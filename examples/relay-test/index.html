@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Browseress Relay Server Integration Test</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 0 20px;
+      line-height: 1.6;
+    }
+    h1 { color: #333; }
+    .status {
+      padding: 10px;
+      border-radius: 4px;
+      margin: 20px 0;
+      font-weight: bold;
+    }
+    .status.connected { background: #d4edda; color: #155724; }
+    .status.disconnected { background: #f8d7da; color: #721c24; }
+    .status.connecting { background: #fff3cd; color: #856404; }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+      margin: 5px;
+    }
+    button:hover:not(:disabled) { background: #0056b3; }
+    button:disabled { 
+      background: #6c757d; 
+      cursor: not-allowed;
+    }
+    .test-section {
+      border: 1px solid #dee2e6;
+      border-radius: 4px;
+      padding: 20px;
+      margin: 20px 0;
+    }
+    .test-result {
+      margin: 10px 0;
+      padding: 10px;
+      border-radius: 4px;
+    }
+    .test-result.success { background: #d4edda; color: #155724; }
+    .test-result.error { background: #f8d7da; color: #721c24; }
+    pre {
+      background: #f8f9fa;
+      padding: 10px;
+      border-radius: 4px;
+      overflow-x: auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>Browseress Relay Server Integration Test</h1>
+  
+  <div class="status disconnected" id="status">Disconnected</div>
+  
+  <div>
+    <button id="startBtn">Start Server</button>
+    <button id="stopBtn" disabled>Stop Server</button>
+  </div>
+
+  <div class="test-section">
+    <h2>Test Operations</h2>
+    <button id="testGetBtn" disabled>Test GET Request</button>
+    <button id="testPostBtn" disabled>Test POST Request</button>
+    <button id="test404Btn" disabled>Test 404 Error</button>
+    <button id="testConcurrentBtn" disabled>Test Concurrent Requests</button>
+    <button id="runAllTestsBtn" disabled>Run All Tests</button>
+  </div>
+
+  <div class="test-section">
+    <h2>Test Results</h2>
+    <div id="testResults"></div>
+  </div>
+
+  <script src="../../dist/browseress.bundle.js"></script>
+  <script>
+    let app;
+    let transport;
+    let isConnected = false;
+    
+    const statusEl = document.getElementById('status');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const testGetBtn = document.getElementById('testGetBtn');
+    const testPostBtn = document.getElementById('testPostBtn');
+    const test404Btn = document.getElementById('test404Btn');
+    const testConcurrentBtn = document.getElementById('testConcurrentBtn');
+    const runAllTestsBtn = document.getElementById('runAllTestsBtn');
+    const testResultsEl = document.getElementById('testResults');
+    
+    function updateStatus(status) {
+      statusEl.textContent = status;
+      statusEl.className = 'status ' + status.toLowerCase();
+      
+      if (status === 'Connected') {
+        isConnected = true;
+        stopBtn.disabled = false;
+        startBtn.disabled = true;
+        testGetBtn.disabled = false;
+        testPostBtn.disabled = false;
+        test404Btn.disabled = false;
+        testConcurrentBtn.disabled = false;
+        runAllTestsBtn.disabled = false;
+      } else {
+        isConnected = false;
+        stopBtn.disabled = true;
+        startBtn.disabled = false;
+        testGetBtn.disabled = true;
+        testPostBtn.disabled = true;
+        test404Btn.disabled = true;
+        testConcurrentBtn.disabled = true;
+        runAllTestsBtn.disabled = true;
+      }
+    }
+    
+    function addTestResult(test, success, details) {
+      const resultEl = document.createElement('div');
+      resultEl.className = 'test-result ' + (success ? 'success' : 'error');
+      resultEl.innerHTML = `
+        <strong>${test}:</strong> ${success ? 'PASSED' : 'FAILED'}
+        ${details ? '<pre>' + JSON.stringify(details, null, 2) + '</pre>' : ''}
+      `;
+      testResultsEl.appendChild(resultEl);
+    }
+    
+    startBtn.addEventListener('click', async () => {
+      try {
+        updateStatus('Connecting');
+        testResultsEl.innerHTML = '';
+        
+        // Get Express from bundle
+        const express = window.browseress.express;
+        
+        // Create Express app
+        app = express();
+        
+        // Add CORS middleware
+        app.use((req, res, next) => {
+          res.header('Access-Control-Allow-Origin', '*');
+          res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+          res.header('Access-Control-Allow-Headers', 'Content-Type');
+          if (req.method === 'OPTIONS') {
+            return res.sendStatus(200);
+          }
+          next();
+        });
+        
+        // Configure routes for testing
+        app.get('/test', (req, res) => {
+          res.json({ message: 'Hello from Browseress!' });
+        });
+        
+        app.post('/users', (req, res) => {
+          let body = '';
+          req.on('data', chunk => body += chunk);
+          req.on('end', () => {
+            const data = JSON.parse(body);
+            res.status(201).json({
+              id: 123,
+              name: data.name
+            });
+          });
+        });
+        
+        app.get('/count/:id', (req, res) => {
+          setTimeout(() => {
+            res.json({ id: req.params.id });
+          }, Math.random() * 50);
+        });
+        
+        // 404 handler
+        app.use((req, res) => {
+          res.status(404).json({ error: 'Not found' });
+        });
+        
+        // Create WebSocket transport
+        transport = new window.browseress.WebSocketTransport('ws://localhost:3001');
+        
+        // Listen with transport
+        await new Promise((resolve, reject) => {
+          transport.on('connect', () => {
+            updateStatus('Connected');
+            resolve();
+          });
+          
+          transport.on('error', (err) => {
+            console.error('Transport error:', err);
+            updateStatus('Error: ' + err.message);
+            reject(err);
+          });
+          
+          app.listen(transport);
+        });
+        
+      } catch (err) {
+        console.error('Failed to start:', err);
+        updateStatus('Failed to connect');
+      }
+    });
+    
+    stopBtn.addEventListener('click', () => {
+      if (transport) {
+        transport.close();
+        transport = null;
+        app = null;
+      }
+      updateStatus('Disconnected');
+      testResultsEl.innerHTML = '';
+    });
+    
+    // Test GET request
+    testGetBtn.addEventListener('click', async () => {
+      try {
+        const response = await fetch('http://localhost:8080/test');
+        const data = await response.json();
+        
+        if (response.ok && data.message === 'Hello from Browseress!') {
+          addTestResult('GET /test', true, data);
+        } else {
+          addTestResult('GET /test', false, { status: response.status, data });
+        }
+      } catch (err) {
+        addTestResult('GET /test', false, { error: err.message });
+      }
+    });
+    
+    // Test POST request
+    testPostBtn.addEventListener('click', async () => {
+      try {
+        const response = await fetch('http://localhost:8080/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'Test User' })
+        });
+        const data = await response.json();
+        
+        if (response.status === 201 && data.id === 123 && data.name === 'Test User') {
+          addTestResult('POST /users', true, data);
+        } else {
+          addTestResult('POST /users', false, { status: response.status, data });
+        }
+      } catch (err) {
+        addTestResult('POST /users', false, { error: err.message });
+      }
+    });
+    
+    // Test 404 error
+    test404Btn.addEventListener('click', async () => {
+      try {
+        const response = await fetch('http://localhost:8080/nonexistent');
+        const data = await response.json();
+        
+        if (response.status === 404 && data.error === 'Not found') {
+          addTestResult('GET /nonexistent (404)', true, data);
+        } else {
+          addTestResult('GET /nonexistent (404)', false, { status: response.status, data });
+        }
+      } catch (err) {
+        addTestResult('GET /nonexistent (404)', false, { error: err.message });
+      }
+    });
+    
+    // Test concurrent requests
+    testConcurrentBtn.addEventListener('click', async () => {
+      try {
+        const promises = [];
+        for (let i = 1; i <= 5; i++) {
+          promises.push(
+            fetch(`http://localhost:8080/count/${i}`)
+              .then(res => res.json())
+              .then(data => ({ id: i, data }))
+          );
+        }
+        
+        const results = await Promise.all(promises);
+        const allCorrect = results.every(r => r.data.id === String(r.id));
+        
+        if (allCorrect) {
+          addTestResult('Concurrent requests (5)', true, results);
+        } else {
+          addTestResult('Concurrent requests (5)', false, results);
+        }
+      } catch (err) {
+        addTestResult('Concurrent requests (5)', false, { error: err.message });
+      }
+    });
+    
+    // Run all tests
+    runAllTestsBtn.addEventListener('click', async () => {
+      testResultsEl.innerHTML = '';
+      
+      // Run tests sequentially with delays
+      await new Promise(resolve => {
+        testGetBtn.click();
+        setTimeout(resolve, 500);
+      });
+      
+      await new Promise(resolve => {
+        testPostBtn.click();
+        setTimeout(resolve, 500);
+      });
+      
+      await new Promise(resolve => {
+        test404Btn.click();
+        setTimeout(resolve, 500);
+      });
+      
+      await new Promise(resolve => {
+        testConcurrentBtn.click();
+        setTimeout(resolve, 500);
+      });
+    });
+  </script>
+</body>
+</html>

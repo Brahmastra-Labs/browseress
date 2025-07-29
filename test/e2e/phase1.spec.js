@@ -2,6 +2,7 @@ const { test, expect } = require('@playwright/test');
 
 test.describe('Phase 1: Request Context & Header Manipulation', () => {
   let apiContext;
+  let page;
 
   test.beforeAll(async ({ browser }) => {
     // Create a browser context with proper headers for SharedArrayBuffer
@@ -10,7 +11,7 @@ test.describe('Phase 1: Request Context & Header Manipulation', () => {
     });
     
     // Open Phase 1 test app
-    const page = await context.newPage();
+    page = await context.newPage();
     await page.goto('/examples/phase1-test/');
     
     // Wait for page to load
@@ -24,6 +25,18 @@ test.describe('Phase 1: Request Context & Header Manipulation', () => {
     
     // Keep the page open for the duration of tests
     apiContext = await context.request;
+  });
+
+  test.afterAll(async () => {
+    if (page) {
+      // Stop the server before closing
+      const stopBtn = page.locator('#stopBtn');
+      if (await stopBtn.isEnabled()) {
+        await stopBtn.click();
+        await page.waitForSelector('.status.disconnected', { timeout: 5000 });
+      }
+      await page.close();
+    }
   });
 
   test('should expose request properties', async ({ request }) => {

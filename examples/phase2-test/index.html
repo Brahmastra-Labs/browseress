@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Browseress Phase 2 Test App</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f0f0f0;
+    }
+    .container {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      margin-bottom: 20px;
+    }
+    .status {
+      padding: 10px;
+      border-radius: 4px;
+      margin-bottom: 15px;
+    }
+    .status.connected {
+      background: #d4edda;
+      color: #155724;
+    }
+    .status.disconnected {
+      background: #f8d7da;
+      color: #721c24;
+    }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-right: 10px;
+      margin-bottom: 10px;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    button:disabled {
+      background: #6c757d;
+      cursor: not-allowed;
+    }
+    .log {
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: 4px;
+      padding: 10px;
+      height: 300px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+    }
+    .endpoints {
+      background: #e9ecef;
+      padding: 15px;
+      border-radius: 4px;
+      margin-top: 15px;
+    }
+    code {
+      background: #f8f9fa;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: monospace;
+    }
+    .file-manager {
+      border: 1px solid #dee2e6;
+      border-radius: 4px;
+      padding: 15px;
+      margin-top: 15px;
+    }
+    input[type="text"] {
+      padding: 8px;
+      border: 1px solid #ced4da;
+      border-radius: 4px;
+      margin-right: 10px;
+      width: 200px;
+    }
+    textarea {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ced4da;
+      border-radius: 4px;
+      font-family: monospace;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🧪 Browseress Phase 2 Test App</h1>
+  <p>Testing state management and file I/O with OPFS</p>
+
+  <div class="container">
+    <h2>Server Status</h2>
+    <div id="status" class="status disconnected">Disconnected</div>
+    <button id="startBtn" onclick="startServer()">Start Test Server</button>
+    <button id="stopBtn" onclick="stopServer()" disabled>Stop Server</button>
+    <button onclick="clearLog()">Clear Log</button>
+  </div>
+
+  <div class="container">
+    <h2>File Manager</h2>
+    <div class="file-manager">
+      <h3>Create Test Files</h3>
+      <button onclick="createTestFiles()">Create Sample Files</button>
+      <button onclick="listFiles()">List Files</button>
+      
+      <h3>Create Custom File</h3>
+      <input type="text" id="filename" placeholder="filename.txt">
+      <button onclick="createFile()">Create File</button>
+      <br>
+      <textarea id="fileContent" rows="4" placeholder="File content..."></textarea>
+    </div>
+  </div>
+
+  <div class="container">
+    <h2>Server Log</h2>
+    <div id="log" class="log"></div>
+  </div>
+
+  <div class="container" id="testEndpoints" style="display: none;">
+    <h2>Phase 2 Test Endpoints</h2>
+    <div class="endpoints">
+      <h3>State Management:</h3>
+      <p><code>GET /locals-test</code> - Tests res.locals middleware pattern</p>
+      
+      <h3>File I/O:</h3>
+      <p><code>GET /files/:filename</code> - Serves file using res.sendFile()</p>
+      <p><code>GET /download/:filename</code> - Downloads file using res.download()</p>
+      <p><code>GET /attachment/:filename</code> - Tests res.attachment()</p>
+      
+      <h3>Test Files:</h3>
+      <p><code>GET /files/test.txt</code> - Plain text file</p>
+      <p><code>GET /files/data.json</code> - JSON file</p>
+      <p><code>GET /files/index.html</code> - HTML file</p>
+      <p><code>GET /download/report.pdf</code> - Download as PDF</p>
+    </div>
+  </div>
+
+  <script src="../../dist/browseress.bundle.js"></script>
+  <script>
+    let app;
+    let transport;
+    let fs;
+    
+    function log(message, type = 'info') {
+      const logDiv = document.getElementById('log');
+      const time = new Date().toLocaleTimeString();
+      const entry = `[${time}] ${message}\n`;
+      logDiv.textContent += entry;
+      logDiv.scrollTop = logDiv.scrollHeight;
+    }
+    
+    function updateStatus(text, connected) {
+      const statusDiv = document.getElementById('status');
+      statusDiv.textContent = text;
+      statusDiv.className = `status ${connected ? 'connected' : 'disconnected'}`;
+      
+      document.getElementById('startBtn').disabled = connected;
+      document.getElementById('stopBtn').disabled = !connected;
+      document.getElementById('testEndpoints').style.display = connected ? 'block' : 'none';
+    }
+    
+    function clearLog() {
+      document.getElementById('log').textContent = '';
+    }
+    
+    async function createTestFiles() {
+      if (!fs) {
+        log('File system not initialized');
+        return;
+      }
+      
+      try {
+        // Create test files
+        await fs.writeFile('/test.txt', 'Hello from OPFS!\nThis is a test file.');
+        log('Created /test.txt');
+        
+        await fs.writeFile('/data.json', JSON.stringify({
+          message: 'This is JSON data',
+          timestamp: new Date().toISOString(),
+          features: ['OPFS', 'WebSocket', 'Express']
+        }, null, 2));
+        log('Created /data.json');
+        
+        await fs.writeFile('/index.html', `<!DOCTYPE html>
+<html>
+<head><title>Test Page</title></head>
+<body>
+  <h1>Hello from OPFS!</h1>
+  <p>This HTML file is served from the Origin Private File System.</p>
+</body>
+</html>`);
+        log('Created /index.html');
+        
+        await fs.writeFile('/report.pdf', 'This would be a PDF file in a real application');
+        log('Created /report.pdf');
+        
+        log('Test files created successfully!');
+      } catch (err) {
+        log(`Error creating files: ${err.message}`);
+      }
+    }
+    
+    async function listFiles() {
+      if (!fs) {
+        log('File system not initialized');
+        return;
+      }
+      
+      try {
+        const files = await fs.readdir('/');
+        log(`Files in OPFS root: ${files.join(', ')}`);
+      } catch (err) {
+        log(`Error listing files: ${err.message}`);
+      }
+    }
+    
+    async function createFile() {
+      if (!fs) {
+        log('File system not initialized');
+        return;
+      }
+      
+      const filename = document.getElementById('filename').value;
+      const content = document.getElementById('fileContent').value;
+      
+      if (!filename) {
+        log('Please enter a filename');
+        return;
+      }
+      
+      try {
+        const path = filename.startsWith('/') ? filename : '/' + filename;
+        await fs.writeFile(path, content || '');
+        log(`Created ${path}`);
+        document.getElementById('filename').value = '';
+        document.getElementById('fileContent').value = '';
+      } catch (err) {
+        log(`Error creating file: ${err.message}`);
+      }
+    }
+    
+    async function startServer() {
+      try {
+        log('Starting Phase 2 test server...');
+        
+        // Get Express and WebSocketTransport from bundle
+        const express = window.browseress.express;
+        const WebSocketTransport = window.browseress.WebSocketTransport;
+        fs = window.browseress.fs;
+        
+        // Create Express app
+        app = express();
+        
+        // Middleware to parse JSON
+        app.use((req, res, next) => {
+          if (req.headers['content-type'] === 'application/json') {
+            let body = '';
+            req.on('data', chunk => body += chunk);
+            req.on('end', () => {
+              try {
+                req.body = JSON.parse(body);
+              } catch (e) {
+                req.body = {};
+              }
+              next();
+            });
+          } else {
+            next();
+          }
+        });
+        
+        // Logging middleware
+        app.use((req, res, next) => {
+          const start = Date.now();
+          const originalEnd = res.end;
+          res.end = function() {
+            const duration = Date.now() - start;
+            log(`${req.method} ${req.url} - ${res.statusCode} (${duration}ms)`);
+            originalEnd.apply(res, arguments);
+          };
+          next();
+        });
+        
+        // Phase 2 Test Routes
+        
+        // Test Case 1: res.locals
+        app.use('/locals-test', (req, res, next) => {
+          // First middleware sets locals
+          res.locals.user = { id: 123, name: 'Test User' };
+          res.locals.timestamp = new Date().toISOString();
+          next();
+        });
+        
+        app.get('/locals-test', (req, res) => {
+          // Second middleware uses locals
+          res.json({
+            message: 'res.locals test',
+            locals: res.locals
+          });
+        });
+        
+        // Test Case 2: res.sendFile
+        app.get('/files/:filename', (req, res) => {
+          const filename = req.params.filename;
+          const path = '/' + filename;
+          
+          log(`Serving file: ${path}`);
+          res.sendFile(path, (err) => {
+            if (err) {
+              log(`Error serving file: ${err.message}`);
+            }
+          });
+        });
+        
+        // Test Case 3: res.download
+        app.get('/download/:filename', (req, res) => {
+          const filename = req.params.filename;
+          const path = '/' + filename;
+          
+          log(`Downloading file: ${path}`);
+          res.download(path, filename, (err) => {
+            if (err) {
+              log(`Error downloading file: ${err.message}`);
+            }
+          });
+        });
+        
+        // Test Case 4: res.attachment
+        app.get('/attachment/:filename', (req, res) => {
+          const filename = req.params.filename;
+          res.attachment(filename);
+          res.json({
+            message: 'Attachment header set',
+            filename: filename
+          });
+        });
+        
+        // Default route
+        app.get('/', (req, res) => {
+          res.json({
+            name: 'Browseress Phase 2 Test Server',
+            features: {
+              stateManagement: ['res.locals'],
+              fileIO: ['res.sendFile', 'res.download', 'res.attachment']
+            }
+          });
+        });
+        
+        // 404 handler
+        app.use((req, res) => {
+          res.status(404).json({ error: 'Not found' });
+        });
+        
+        // Create transport
+        transport = new WebSocketTransport('ws://localhost:3001');
+        
+        transport.on('connect', () => {
+          log('Connected to relay server!');
+          updateStatus('Connected - Phase 2 Test Server is live!', true);
+          log('Server ready at http://localhost:8080');
+          log('Create some test files to serve!');
+        });
+        
+        transport.on('disconnect', () => {
+          log('Disconnected from relay server');
+          updateStatus('Disconnected', false);
+        });
+        
+        transport.on('error', (err) => {
+          log(`Error: ${err.message}`);
+        });
+        
+        // Start listening
+        app.listen(transport, (err) => {
+          if (err) {
+            log(`Failed to start: ${err.message}`);
+            updateStatus('Failed to start', false);
+          }
+        });
+        
+      } catch (err) {
+        log(`Error: ${err.message}`);
+        console.error(err);
+      }
+    }
+    
+    function stopServer() {
+      if (transport) {
+        log('Stopping server...');
+        transport.close();
+        transport = null;
+        app = null;
+        updateStatus('Disconnected', false);
+      }
+    }
+    
+    // Auto-start on load
+    window.addEventListener('load', () => {
+      log('Browseress Phase 2 Test App loaded');
+      log('Click "Start Test Server" to begin');
+      log('Remember to start the relay server first!');
+    });
+  </script>
+</body>
+</html>
