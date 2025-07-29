@@ -117,6 +117,9 @@
     
     <h3>5. View Caching</h3>
     <button id="testCachingBtn" disabled>Test View Cache</button>
+    
+    <h3>6. EJS Includes/Partials</h3>
+    <button id="testIncludesBtn" disabled>Test Includes Support</button>
   </div>
 
   <div class="test-section">
@@ -147,6 +150,8 @@
   <script src="../../dist/browseress.bundle.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/ejs@3.1.9/ejs.min.js"></script>
   <script>
+    // Provide our fs to the global scope so EJS can use it
+    window.fs = window.browseress.fs;
     let app;
     let transport;
     const express = window.browseress.express;
@@ -172,6 +177,7 @@
       document.getElementById('testLayoutBtn').disabled = !isConnected;
       document.getElementById('testErrorBtn').disabled = !isConnected;
       document.getElementById('testCachingBtn').disabled = !isConnected;
+      document.getElementById('testIncludesBtn').disabled = !isConnected;
       document.getElementById('createTemplateBtn').disabled = !isConnected;
       document.getElementById('renderCustomBtn').disabled = !isConnected;
     }
@@ -297,6 +303,49 @@
 </html>
         `);
         
+        // Create partial templates
+        await fs.writeFile('/views/partials/header.ejs', `
+<header class="main-header">
+  <h1><%= title || 'Browseress App' %></h1>
+  <nav>
+    <a href="/">Home</a> |
+    <a href="/about">About</a> |
+    <a href="/contact">Contact</a>
+  </nav>
+</header>
+        `);
+        
+        await fs.writeFile('/views/partials/footer.ejs', `
+<footer class="main-footer">
+  <p>&copy; 2024 Browseress. Powered by Express in the browser!</p>
+  <p>App: <%= appName %>, Version: <%= version %></p>
+</footer>
+        `);
+        
+        // Create a template that uses includes
+        await fs.writeFile('/views/with-includes.ejs', `
+<!DOCTYPE html>
+<html>
+<head>
+  <title><%= title %></title>
+  <style>
+    .main-header { background: #007bff; color: white; padding: 20px; }
+    .main-content { padding: 20px; min-height: 300px; }
+    .main-footer { background: #f8f9fa; padding: 20px; text-align: center; }
+  </style>
+</head>
+<body>
+  <%- include('partials/header') %>
+  <main class="main-content">
+    <h2><%= pageTitle %></h2>
+    <p><%= content %></p>
+    <p>This template uses EJS includes!</p>
+  </main>
+  <%- include('partials/footer') %>
+</body>
+</html>
+        `);
+        
         showOutput('Templates created successfully in /views/', false);
       } catch (err) {
         showOutput('Error creating templates: ' + err.message, true);
@@ -311,12 +360,42 @@
         // Create Express app
         app = express();
         
+        // Get the path module from browseress
+        const path = window.browseress.path;
+        
         // Register EJS engine BEFORE setting view engine
         app.engine('ejs', async (filepath, options, callback) => {
           try {
             // Use async readFile to avoid sync operations
-            const content = await fs.readFile(filepath, 'utf8');
-            const html = ejs.render(content, options);
+            let content = await fs.readFile(filepath, 'utf8');
+            
+            // Pre-process includes manually to avoid EJS fs usage
+            const includeRegex = /<%[-=]?\s*include\s*\(\s*['"`]([^'"`]+)['"`]\s*\)\s*%>/g;
+            const matches = [...content.matchAll(includeRegex)];
+            
+            for (const match of matches) {
+              const includePath = match[1];
+              const dir = path.dirname(filepath);
+              const resolvedPath = path.resolve(dir, includePath);
+              const fullPath = resolvedPath.endsWith('.ejs') ? resolvedPath : `${resolvedPath}.ejs`;
+              
+              try {
+                const includeContent = await fs.readFile(fullPath, 'utf8');
+                // Replace the include directive with the actual content
+                content = content.replace(match[0], includeContent);
+              } catch (err) {
+                console.error(`Failed to include '${includePath}':`, err);
+                throw new Error(`Failed to include '${includePath}': ${err.message}`);
+              }
+            }
+            
+            // Now render the pre-processed template
+            // Don't use async: true as it might return a promise
+            const html = ejs.render(content, options, {
+              filename: filepath
+            });
+            
+            console.log('[EJS Engine] Rendered HTML:', typeof html, html ? html.substring(0, 100) : 'null');
             callback(null, html);
           } catch (err) {
             callback(err);
@@ -396,6 +475,21 @@
           };
           
           res.render(req.params.template, data);
+        });
+        
+        app.get('/with-includes', (req, res) => {
+          res.render('with-includes', {
+            title: 'Page with Includes',
+            pageTitle: 'Testing EJS Includes',
+            content: 'This page demonstrates EJS includes with OPFS support!'
+          }, (err, html) => {
+            if (err) {
+              console.error('[/with-includes] Render error:', err);
+              res.status(500).send('Render error: ' + err.message);
+            } else {
+              res.send(html);
+            }
+          });
         });
         
         // Create WebSocket transport
@@ -540,6 +634,20 @@ Environment: ${app.get('env')}
         const response = await fetch(`http://localhost:8080/custom/${templateName}`);
         const html = await response.text();
         showOutput(html);
+      } catch (err) {
+        showOutput('Error: ' + err.message, true);
+      }
+    });
+    
+    document.getElementById('testIncludesBtn').addEventListener('click', async () => {
+      try {
+        const response = await fetch('http://localhost:8080/with-includes');
+        const html = await response.text();
+        if (response.ok) {
+          showOutput(html);
+        } else {
+          showOutput(`Server Error (${response.status}): ${html}`, true);
+        }
       } catch (err) {
         showOutput('Error: ' + err.message, true);
       }

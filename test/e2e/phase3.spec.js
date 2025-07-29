@@ -57,11 +57,15 @@ test.describe('Phase 3: View Rendering Engine Integration', () => {
     test('should support res.render callback', async ({ request }) => {
       const response = await request.get('http://localhost:8080/basic');
       
+      console.log('Response status:', response.status());
+      console.log('Response headers:', response.headers());
+      const body = await response.text();
+      console.log('Response body:', body);
+      
       expect(response.ok()).toBeTruthy();
       expect(response.headers()['content-type']).toContain('text/html');
       
-      const html = await response.text();
-      expect(html).toContain('<title>Browseress View Rendering</title>');
+      expect(body).toContain('<title>Browseress View Rendering</title>');
     });
   });
 
@@ -217,6 +221,68 @@ test.describe('Phase 3: View Rendering Engine Integration', () => {
       const html = await response.text();
       expect(html).toContain('About Us');
       expect(html).toContain('This page uses a layout!');
+    });
+    
+    test('should support EJS includes with OPFS', async () => {
+      // First check if the button exists (it won't if page loaded old version)
+      const buttonExists = await page.locator('#testIncludesBtn').count() > 0;
+      
+      if (!buttonExists) {
+        // The page has the old version without the includes button/route
+        // We need to restart to test this properly
+        
+        // Stop the current server
+        await page.click('#stopBtn');
+        await page.waitForSelector('.status.disconnected', { timeout: 5000 });
+        
+        // Reload the page to get the new version
+        await page.reload();
+        await page.waitForSelector('#startBtn');
+        
+        // Start the server again
+        await page.click('#startBtn');
+        await page.waitForSelector('.status.connected', { timeout: 10000 });
+        
+        // Create templates again
+        await page.click('#createTemplatesBtn');
+        await page.waitForTimeout(1000);
+      }
+      
+      // Now click the test button
+      await page.click('#testIncludesBtn');
+      
+      // Wait for the output to update with includes content or error
+      await page.waitForFunction(() => {
+        const output = document.querySelector('.rendered-output, .error-output');
+        return output && (
+          output.textContent.includes('Testing EJS Includes') || 
+          output.textContent.includes('Server Error')
+        );
+      }, { timeout: 5000 });
+      
+      // Check if we got an error
+      const errorOutput = await page.locator('.error-output').count();
+      if (errorOutput > 0) {
+        const errorText = await page.locator('.error-output').textContent();
+        console.log('Error output:', errorText);
+        throw new Error('Template rendering failed: ' + errorText);
+      }
+      
+      // Check the rendered content
+      const outputHtml = await page.locator('.rendered-output').innerHTML();
+      
+      // Check that the main template rendered
+      expect(outputHtml).toContain('Testing EJS Includes');
+      expect(outputHtml).toContain('This page demonstrates EJS includes with OPFS support!');
+      
+      // Check that header partial was included
+      expect(outputHtml).toContain('<header class="main-header">');
+      expect(outputHtml).toContain('Page with Includes'); // title from data
+      
+      // Check that footer partial was included
+      expect(outputHtml).toContain('<footer class="main-footer">');
+      expect(outputHtml).toContain('Browseress Phase 3'); // appName from app.locals
+      expect(outputHtml).toContain('Version: 1.0.0'); // version from app.locals
     });
   });
 });
