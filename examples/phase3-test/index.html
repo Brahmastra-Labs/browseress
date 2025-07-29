@@ -123,7 +123,6 @@
     
     <h3>7. Multiple Template Engines</h3>
     <button id="testHandlebarsBtn" disabled>Test Handlebars</button>
-    <button id="testPugBtn" disabled>Test Pug</button>
   </div>
 
   <div class="test-section">
@@ -154,7 +153,7 @@
   <script src="../../dist/browseress.bundle.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/ejs@3.1.9/ejs.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/handlebars@4.7.8/dist/handlebars.min.js"></script>
-  <script src="https://pugjs.org/js/pug.js"></script>
+  <!-- Pug removed - no reliable browser build available -->
   <script>
     // Provide our fs to the global scope so EJS can use it
     window.fs = window.browseress.fs;
@@ -185,7 +184,6 @@
       document.getElementById('testCachingBtn').disabled = !isConnected;
       document.getElementById('testIncludesBtn').disabled = !isConnected;
       document.getElementById('testHandlebarsBtn').disabled = !isConnected;
-      document.getElementById('testPugBtn').disabled = !isConnected;
       document.getElementById('createTemplateBtn').disabled = !isConnected;
       document.getElementById('renderCustomBtn').disabled = !isConnected;
     }
@@ -380,26 +378,6 @@
 </html>
         `);
         
-        // Create Pug template
-        await fs.writeFile('/views/pug-demo.pug', `
-doctype html
-html
-  head
-    title= title
-  body
-    h1= heading
-    p This template is rendered with Pug!
-    p Framework: #{framework}
-    
-    if features && features.length
-      h3 Features:
-      ul
-        each feature in features
-          li= feature
-    
-    p Rendered at: #{timestamp}
-        `);
-        
         showOutput('Templates created successfully in /views/', false);
       } catch (err) {
         showOutput('Error creating templates: ' + err.message, true);
@@ -425,23 +403,6 @@ html
             const html = compiled(options);
             callback(null, html);
           } catch (err) {
-            callback(err);
-          }
-        });
-        
-        // Register Pug engine
-        app.engine('pug', async (filepath, options, callback) => {
-          try {
-            const template = await fs.readFile(filepath, 'utf8');
-            // Pug needs filename in options for includes/extends to work
-            const pugOptions = Object.assign({}, options, {
-              filename: filepath,
-              basedir: '/views'
-            });
-            const html = pug.render(template, pugOptions);
-            callback(null, html);
-          } catch (err) {
-            console.error('[Pug Engine] Error:', err);
             callback(err);
           }
         });
@@ -569,21 +530,6 @@ html
               'Multiple template engines',
               'OPFS file storage',
               'WebSocket transport'
-            ],
-            timestamp: new Date().toLocaleString()
-          });
-        });
-        
-        app.get('/pug-demo', (req, res) => {
-          res.render('pug-demo.pug', {
-            title: 'Pug in Browseress',
-            heading: 'Pug Templates Work Too!',
-            framework: 'Express + Browseress',
-            features: [
-              'Clean syntax',
-              'No closing tags',
-              'Powerful features',
-              'Browser compatible'
             ],
             timestamp: new Date().toLocaleString()
           });

@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Express Test Harness - Browseress</title>
+  <style>
+    body {
+      font-family: monospace;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f0f0f0;
+    }
+    .container {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      margin-bottom: 20px;
+    }
+    .status {
+      padding: 10px;
+      border-radius: 4px;
+      margin-bottom: 15px;
+    }
+    .status.connected {
+      background: #d4edda;
+      color: #155724;
+    }
+    .status.disconnected {
+      background: #f8d7da;
+      color: #721c24;
+    }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-right: 10px;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    button:disabled {
+      background: #6c757d;
+      cursor: not-allowed;
+    }
+    .test-output {
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: 4px;
+      padding: 10px;
+      font-size: 12px;
+      white-space: pre-wrap;
+      max-height: 500px;
+      overflow-y: auto;
+    }
+    .pass { color: green; }
+    .fail { color: red; }
+    .skip { color: gray; }
+    .error { color: red; font-weight: bold; }
+    .test-selector {
+      margin: 15px 0;
+    }
+    .test-selector select {
+      padding: 8px;
+      margin-right: 10px;
+      border-radius: 4px;
+      border: 1px solid #ced4da;
+    }
+    .test-category {
+      display: inline-block;
+      margin: 5px;
+      padding: 5px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    .category-pass { background: #d4edda; color: #155724; }
+    .category-adapted { background: #cce5ff; color: #004085; }
+    .category-not-applicable { background: #f8d7da; color: #721c24; }
+    .category-bug { background: #fff3cd; color: #856404; }
+    .test-stats {
+      margin: 10px 0;
+      font-size: 14px;
+    }
+    .loading { opacity: 0.6; }
+  </style>
+</head>
+<body>
+  <h1>🧪 Express Test Harness - Browseress</h1>
+  <p>Run Express.js tests in the browser using Browseress</p>
+
+  <div class="container">
+    <h2>Server Status</h2>
+    <div id="status" class="status disconnected">Disconnected</div>
+    <button id="startBtn" onclick="startServer()">Start Test Server</button>
+    <button id="stopBtn" onclick="stopServer()" disabled>Stop Server</button>
+    <button id="clearBtn" onclick="clearOutput()">Clear Output</button>
+    
+    <div class="test-selector">
+      <select id="testSelect" disabled>
+        <option value="">Select a test suite...</option>
+      </select>
+      <button id="loadTestBtn" onclick="loadSelectedTest()" disabled>Load Test</button>
+      <button id="runLoadedTestBtn" onclick="runLoadedTest()" disabled>Run Loaded Test</button>
+      <button id="runTestBtn" onclick="runExpressTest()" disabled style="margin-left: 20px;">Run Express Test</button>
+    </div>
+    
+    <div id="testStats" class="test-stats"></div>
+  </div>
+
+  <div class="container">
+    <h2>Test Output</h2>
+    <div id="output" class="test-output">Waiting for Browseress to load...</div>
+  </div>
+
+  <script src="../../dist/browseress.bundle.js"></script>
+  <script src="test-utils.js"></script>
+  <script src="enhanced-test-loader.js"></script>
+  <script src="test-transformer.js"></script>
+  <script src="test-executor.js"></script>
+  <script>
+    let app = null;
+    let transport = null;
+    let serverStarted = false;
+    let testLoader = null;
+    let testTransformer = null;
+    let testExecutor = null;
+    let currentTestCode = null;
+    let currentTestMetadata = null;
+    
+    function log(message, className = '') {
+      const output = document.getElementById('output');
+      const div = document.createElement('div');
+      div.className = className;
+      div.textContent = message;
+      output.appendChild(div);
+      output.scrollTop = output.scrollHeight;
+    }
+    
+    function clearOutput() {
+      document.getElementById('output').innerHTML = '';
+    }
+    
+    function updateStatus(text, connected) {
+      const statusDiv = document.getElementById('status');
+      statusDiv.textContent = text;
+      statusDiv.className = `status ${connected ? 'connected' : 'disconnected'}`;
+      
+      document.getElementById('startBtn').disabled = connected;
+      document.getElementById('stopBtn').disabled = !connected;
+      
+      if (!connected) {
+        document.getElementById('testSelect').disabled = true;
+        document.getElementById('loadTestBtn').disabled = true;
+        document.getElementById('runLoadedTestBtn').disabled = true;
+        document.getElementById('runTestBtn').disabled = true;
+      }
+    }
+    
+    async function initializeTestSystem() {
+      testLoader = new EnhancedTestLoader();
+      testTransformer = new TestTransformer();
+      testExecutor = new TestExecutor();
+      
+      // Load available tests
+      const tests = await testLoader.discoverTests();
+      const select = document.getElementById('testSelect');
+      
+      tests.forEach(test => {
+        const option = document.createElement('option');
+        option.value = test.name;
+        option.textContent = `${test.name} - ${test.description}`;
+        select.appendChild(option);
+      });
+      
+      log('Test system initialized');
+    }
+    
+    async function startServer() {
+      try {
+        clearOutput();
+        log('Starting test harness server...');
+        
+        // Initialize test system
+        await initializeTestSystem();
+        
+        // Get Express and WebSocketTransport from bundle
+        const express = window.browseress.express;
+        const WebSocketTransport = window.browseress.WebSocketTransport;
+        
+        // Create transport and connect
+        transport = new WebSocketTransport('ws://localhost:3001');
+        
+        transport.on('connect', () => {
+          log('Connected to relay server!');
+          updateStatus('Connected - Ready to run tests', true);
+          serverStarted = true;
+          
+          // Enable test selection
+          document.getElementById('testSelect').disabled = false;
+          document.getElementById('loadTestBtn').disabled = false;
+          // Enable legacy button for E2E tests (keeps old ID for compatibility)
+          document.getElementById('runTestBtn').disabled = false;
+        });
+        
+        transport.on('disconnect', () => {
+          log('Disconnected from relay server');
+          updateStatus('Disconnected', false);
+          serverStarted = false;
+        });
+        
+        transport.on('error', (err) => {
+          log(`Transport error: ${err.message}`, 'error');
+        });
+        
+        // Connect to relay
+        await transport.connect();
+        
+      } catch (err) {
+        log(`Error starting server: ${err.message}`, 'error');
+        console.error(err);
+        updateStatus('Failed to start', false);
+      }
+    }
+    
+    function stopServer() {
+      if (transport) {
+        log('Stopping server...');
+        transport.close();
+        transport = null;
+        serverStarted = false;
+        updateStatus('Disconnected', false);
+      }
+    }
+    
+    // Simple test runner
+    const TestRunner = {
+      tests: [],
+      beforeHooks: [],
+      afterHooks: [],
+      currentDescribe: null,
+      
+      reset() {
+        this.tests = [];
+        this.beforeHooks = [];
+        this.afterHooks = [];
+        this.currentDescribe = null;
+      },
+      
+      describe(name, fn) {
+        log(`\n${name}`, 'describe');
+        fn();
+      },
+      
+      it(name, fn) {
+        TestRunner.tests.push({ name, fn });
+      },
+      
+      before(fn) {
+        TestRunner.beforeHooks.push(fn);
+      },
+      
+      after(fn) {
+        TestRunner.afterHooks.push(fn);
+      },
+      
+      async run() {
+        let passed = 0;
+        let failed = 0;
+        
+        // Run before hooks
+        for (const hook of this.beforeHooks) {
+          try {
+            await hook();
+          } catch (err) {
+            log('✗ before hook failed: ' + err.message, 'fail');
+            return { passed, failed: 1 };
+          }
+        }
+        
+        // Run tests
+        for (const test of this.tests) {
+          try {
+            await test.fn();
+            log(`  ✓ ${test.name}`, 'pass');
+            passed++;
+          } catch (err) {
+            log(`  ✗ ${test.name}`, 'fail');
+            log(`    ${err.message}`, 'error');
+            failed++;
+          }
+        }
+        
+        // Run after hooks
+        for (const hook of this.afterHooks) {
+          try {
+            await hook();
+          } catch (err) {
+            log('✗ after hook failed: ' + err.message, 'fail');
+          }
+        }
+        
+        return { passed, failed };
+      }
+    };
+    
+    // Simple assertion helpers
+    function expect(actual) {
+      return {
+        toBe(expected) {
+          if (actual !== expected) {
+            throw new Error(`Expected ${JSON.stringify(actual)} to be ${JSON.stringify(expected)}`);
+          }
+        },
+        toEqual(expected) {
+          if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+            throw new Error(`Expected ${JSON.stringify(actual)} to equal ${JSON.stringify(expected)}`);
+          }
+        },
+        toContain(expected) {
+          if (!actual.includes(expected)) {
+            throw new Error(`Expected "${actual}" to contain "${expected}"`);
+          }
+        },
+        toBeTruthy() {
+          if (!actual) {
+            throw new Error(`Expected ${actual} to be truthy`);
+          }
+        },
+        toBeFalsy() {
+          if (actual) {
+            throw new Error(`Expected ${actual} to be falsy`);
+          }
+        },
+        toBeUndefined() {
+          if (actual !== undefined) {
+            throw new Error(`Expected ${actual} to be undefined`);
+          }
+        }
+      };
+    }
+    
+    // Simple supertest-like interface
+    function request(app) {
+      // Auto-listen the app on transport if not already listening
+      if (window._testTransport && !app._listening) {
+        app.listen(window._testTransport);
+        app._listening = true;
+        console.log('[Test] Auto-listening app on transport');
+      }
+      
+      // Create request object with all HTTP methods from http-stub polyfill
+      const requestObj = {};
+      
+      // Common HTTP methods
+      const methods = [
+        'get', 'post', 'put', 'delete', 'patch', 'head', 'options',
+        'connect', 'trace', 'copy', 'lock', 'mkcol', 'move', 'purge',
+        'propfind', 'proppatch', 'unlock', 'bind', 'rebind', 'unbind',
+        'acl', 'report', 'mkactivity', 'checkout', 'merge', 'm-search',
+        'notify', 'subscribe', 'unsubscribe', 'search', 'link', 'unlink'
+      ];
+      
+      // Add all methods to request object
+      methods.forEach(method => {
+        requestObj[method] = function(path) {
+          return makeRequest(method.toUpperCase(), path);
+        };
+      });
+      
+      return requestObj;
+    }
+    
+    function makeRequest(method, path) {
+      const req = {
+        method,
+        path,
+        headers: {},
+        body: null,
+        
+        send(data) {
+          this.body = data;
+          return this;
+        },
+        
+        set(name, value) {
+          this.headers[name] = value;
+          return this;
+        },
+        
+        expect(status, body, callback) {
+          if (typeof status === 'number' && typeof body === 'function') {
+            callback = body;
+            body = undefined;
+          }
+          
+          // Store expectations
+          this.expectedStatus = status;
+          this.expectedBody = body;
+          this.expectCallback = callback;
+          
+          // Return this for chaining
+          return this;
+        },
+        
+        async end(callback) {
+          // Use callback from expect() if not provided
+          callback = callback || this.expectCallback;
+          
+          try {
+            const response = await fetch('http://localhost:8080' + this.path, {
+              method: this.method,
+              headers: {
+                'Content-Type': 'application/json',
+                ...this.headers
+              },
+              body: this.body ? JSON.stringify(this.body) : undefined
+            });
+            
+            const text = await response.text();
+            let body;
+            try {
+              body = JSON.parse(text);
+            } catch (e) {
+              body = text;
+            }
+            
+            const res = {
+              status: response.status,
+              headers: Object.fromEntries(response.headers.entries()),
+              body: body,
+              text: text
+            };
+            
+            // Check expectations
+            if (this.expectedStatus && res.status !== this.expectedStatus) {
+              const err = new Error(`Expected status ${this.expectedStatus} but got ${res.status}`);
+              if (callback) callback(err);
+              else throw err;
+              return;
+            }
+            
+            if (this.expectedBody !== undefined) {
+              const actualBody = typeof res.body === 'string' ? res.body : JSON.stringify(res.body);
+              const expectedBody = typeof this.expectedBody === 'string' ? this.expectedBody : JSON.stringify(this.expectedBody);
+              if (actualBody !== expectedBody) {
+                const err = new Error(`Expected body ${expectedBody} but got ${actualBody}`);
+                if (callback) callback(err);
+                else throw err;
+                return;
+              }
+            }
+            
+            if (callback) callback(null, res);
+            return res;
+          } catch (err) {
+            if (callback) callback(err);
+            else throw err;
+          }
+        }
+      };
+      
+      return req;
+    }
+    
+    // Load selected test
+    async function loadSelectedTest() {
+      const select = document.getElementById('testSelect');
+      const testName = select.value;
+      
+      if (!testName) {
+        log('Please select a test suite', 'error');
+        return;
+      }
+      
+      try {
+        log(`Loading test: ${testName}...`);
+        
+        // Load the test file
+        const testCode = await testLoader.loadTestFile(testName);
+        const metadata = testLoader.getTestMetadata(testName);
+        
+        log(`Test loaded successfully. ${metadata.testCount} tests found.`);
+        
+        // Transform the test
+        const transformed = testTransformer.transformTest(testCode, metadata);
+        
+        // Check for transformation errors
+        if (transformed.error) {
+          log(`Transformation Error: ${transformed.error}`, 'error');
+          if (transformed.unhandledRequires) {
+            log('Unhandled modules:', 'error');
+            transformed.unhandledRequires.forEach(mod => log(`  - ${mod}`, 'error'));
+            log('\nThese modules need to be added to the transformer or mocked in test-utils.js', 'error');
+          }
+          document.getElementById('runLoadedTestBtn').disabled = true;
+          return;
+        }
+        
+        // Display transformation info
+        if (transformed.category === 'NOT_APPLICABLE') {
+          log(`Test category: NOT_APPLICABLE - ${transformed.reason}`, 'error');
+          document.getElementById('runLoadedTestBtn').disabled = true;
+          return;
+        }
+        
+        log(`Test category: ${transformed.category}`);
+        if (transformed.modifications.length > 0) {
+          log('Transformations applied:');
+          transformed.modifications.forEach(mod => {
+            if (mod.startsWith('ERROR:')) {
+              log(`  - ${mod}`, 'error');
+            } else {
+              log(`  - ${mod}`);
+            }
+          });
+        }
+        
+        // Store for execution
+        currentTestCode = transformed.code;
+        currentTestMetadata = transformed.metadata;
+        
+        // Enable run button
+        document.getElementById('runLoadedTestBtn').disabled = false;
+        
+        // Show test stats
+        updateTestStats(transformed);
+        
+      } catch (error) {
+        log(`Error loading test: ${error.message}`, 'error');
+        console.error(error);
+      }
+    }
+    
+    // Run loaded test
+    async function runLoadedTest() {
+      if (!currentTestCode) {
+        log('No test loaded', 'error');
+        return;
+      }
+      
+      if (!serverStarted || !transport) {
+        log('Error: Server not connected. Click "Start Test Server" first.', 'error');
+        return;
+      }
+      
+      // Don't clear output immediately - preserve loading messages
+      log(`\nRunning test: ${currentTestMetadata.name}\n`);
+      
+      try {
+        // Store the transport globally so supertest mock can use it
+        window._testTransport = transport;
+        
+        // Reset test runner
+        TestRunner.reset();
+        
+        // Execute the test to register all describe/it blocks
+        console.log('[Test] Evaluating transformed code...');
+        let testFunction;
+        try {
+          testFunction = eval(currentTestCode);
+          console.log('[Test] Test function created, type:', typeof testFunction);
+        } catch (error) {
+          log(`Failed to evaluate test code: ${error.message}`, 'error');
+          console.error('Eval error:', error);
+          return;
+        }
+        
+        // Make request function available globally for the test
+        window.supertest = request;
+        
+        // Call the test function with our context to register tests
+        console.log('[Test] Calling test function to register tests...');
+        try {
+          testFunction({
+          describe: TestRunner.describe.bind(TestRunner),
+          it: TestRunner.it.bind(TestRunner),
+          before: TestRunner.before.bind(TestRunner),
+          after: TestRunner.after.bind(TestRunner),
+          beforeEach: TestRunner.beforeEach,
+          afterEach: TestRunner.afterEach,
+          expect,
+          assert: window.assert,
+          request: window.supertest,
+          express: window.browseress.express,
+          transport,
+          after: window.after,
+          testUtils: window.testUtils
+        });
+        } catch (error) {
+          log(`Failed to execute test function: ${error.message}`, 'error');
+          console.error('Test execution error:', error);
+          return;
+        }
+        
+        console.log('[Test] Test function called, checking registered tests...');
+        console.log('[Test] Registered tests:', TestRunner.tests.length);
+        
+        // If no tests were registered, there was likely a silent error
+        if (TestRunner.tests.length === 0) {
+          log('WARNING: No tests were registered. This usually means an error occurred during test setup.', 'error');
+          log('Check the browser console for detailed error messages.', 'error');
+        }
+        
+        // Now that tests are registered, run them
+        log('Express app started on http://localhost:8080\n');
+        
+        const startTime = Date.now();
+        const testResults = await TestRunner.run();
+        const duration = Date.now() - startTime;
+        
+        // Display results
+        log(`\n${'='.repeat(50)}`);
+        log(`Test: ${currentTestMetadata.name}`);
+        log(`Category: ${currentTestMetadata.category}`);
+        log(`Duration: ${duration}ms`);
+        log(`Tests: ${testResults.passed} passed, ${testResults.failed} failed, ${testResults.passed + testResults.failed} total`);
+        
+        if (testResults.failed === 0) {
+          log('\n✅ All tests passed!', 'pass');
+        } else {
+          log('\n❌ Some tests failed', 'fail');
+        }
+        
+      } catch (error) {
+        log(`Error running test: ${error.message}`, 'error');
+        console.error(error);
+      } finally {
+        // Clean up
+        app = null;
+      }
+    }
+    
+    // Update test statistics display
+    function updateTestStats(transformed) {
+      const statsDiv = document.getElementById('testStats');
+      const metadata = transformed.metadata;
+      
+      let html = `
+        <div>Test: <strong>${metadata.name}</strong></div>
+        <div>Tests found: ${metadata.testCount}</div>
+        <div>Category: <span class="test-category category-${transformed.category.toLowerCase()}">${transformed.category}</span></div>
+      `;
+      
+      if (metadata.requireStatements && metadata.requireStatements.length > 0) {
+        html += '<div>Dependencies: ';
+        metadata.requireStatements.forEach(req => {
+          html += `<code>${req.module}</code> `;
+        });
+        html += '</div>';
+      }
+      
+      statsDiv.innerHTML = html;
+    }
+    
+    // Run an Express test (legacy function for compatibility)
+    async function runExpressTest() {
+      if (!serverStarted || !transport) {
+        log('Error: Server not connected. Click "Start Test Server" first.', 'error');
+        return;
+      }
+      
+      clearOutput();
+      log('Running Express Test Suite...\n');
+      
+      try {
+        // Reset test runner
+        TestRunner.reset();
+        
+        // Define a simple Express test
+        const { describe, it, before, after } = TestRunner;
+        const express = window.browseress.express;
+        
+        describe('res.json() - Express Test', function() {
+          before(async function() {
+            // Create Express app
+            app = express();
+            
+            // Store transport globally for supertest
+            window._testTransport = transport;
+            
+            // Add CORS middleware
+            app.use((req, res, next) => {
+              res.header('Access-Control-Allow-Origin', '*');
+              res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+              res.header('Access-Control-Allow-Headers', 'Content-Type');
+              if (req.method === 'OPTIONS') {
+                return res.sendStatus(200);
+              }
+              next();
+            });
+            
+            app.get('/json', function(req, res) {
+              res.json({ name: 'tobi' });
+            });
+            
+            app.get('/json-number', function(req, res) {
+              res.json(200);
+            });
+            
+            app.get('/json-string', function(req, res) {
+              res.json('hello');
+            });
+            
+            app.get('/json-null', function(req, res) {
+              res.json(null);
+            });
+            
+            // Use the existing transport connection
+            app.listen(transport);
+            
+            log('Express app started on http://localhost:8080\n');
+          });
+          
+          after(function() {
+            // Don't close transport, just clear the app
+            app = null;
+          });
+          
+          it('should respond with json object', async function() {
+            try {
+              const res = await request(app)
+                .get('/json')
+                .expect(200)
+                .end();
+              
+              expect(res.headers['content-type']).toContain('application/json');
+              expect(res.body).toEqual({ name: 'tobi' });
+            } catch (err) {
+              console.error('Test error details:', err);
+              throw err;
+            }
+          });
+          
+          it('should respond with json number', async function() {
+            const res = await request(app)
+              .get('/json-number')
+              .expect(200)
+              .end();
+            
+            expect(res.headers['content-type']).toContain('application/json');
+            expect(res.text).toBe('200');
+          });
+          
+          it('should respond with json string', async function() {
+            const res = await request(app)
+              .get('/json-string')
+              .expect(200)
+              .end();
+            
+            expect(res.headers['content-type']).toContain('application/json');
+            expect(res.text).toBe('"hello"');
+          });
+          
+          it('should respond with json null', async function() {
+            const res = await request(app)
+              .get('/json-null')
+              .expect(200)
+              .end();
+            
+            expect(res.headers['content-type']).toContain('application/json');
+            expect(res.text).toBe('null');
+          });
+        });
+        
+        // Run the tests
+        const results = await TestRunner.run();
+        
+        log(`\n${'='.repeat(50)}`);
+        log(`Tests: ${results.passed} passed, ${results.failed} failed, ${results.passed + results.failed} total`);
+        
+        if (results.failed === 0) {
+          log('\n✅ All Express tests passed in Browseress!', 'pass');
+        } else {
+          log('\n❌ Some tests failed', 'fail');
+        }
+        
+      } catch (err) {
+        log(`\nError running tests: ${err.message}`, 'error');
+        console.error(err);
+      }
+    }
+    
+    // Initialize on load
+    window.addEventListener('load', () => {
+      log('Express Test Harness loaded');
+      log('This harness demonstrates running Express.js tests in the browser.');
+      log('\n1. Click "Start Test Server" to connect to relay server');
+      log('2. Click "Run Express Test" to run the test suite');
+      log('\nMake sure relay server is running on port 3001!');
+    });
+  </script>
+</body>
+</html>

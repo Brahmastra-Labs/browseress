@@ -1,0 +1,331 @@
+// Test Transformer for Express Test Harness
+// Transforms Node.js Express tests for browser compatibility
+
+class TestTransformer {
+  constructor() {
+    this.transformations = new Map();
+    this.categories = {
+      PASS: 'Tests that work without modification',
+      ADAPTED: 'Tests modified for browser compatibility',
+      NOT_APPLICABLE: 'Tests that cannot run in browser',
+      BUG: 'Tests that fail due to implementation differences'
+    };
+  }
+
+  /**
+   * Transform a test file for browser execution
+   * @param {string} code - Raw test file content
+   * @param {Object} metadata - Test metadata from loader
+   * @returns {Object} Transformed code and categorization
+   */
+  transformTest(code, metadata = {}) {
+    let transformed = code;
+    let category = 'PASS';
+    const modifications = [];
+
+    // Strip 'use strict' as it's implicit in modules
+    transformed = this.stripUseStrict(transformed);
+    if (transformed !== code) {
+      modifications.push('Removed "use strict"');
+    }
+
+    // Transform require statements
+    const requiresResult = this.transformRequires(transformed);
+    transformed = requiresResult.code;
+    if (requiresResult.modified) {
+      modifications.push(...requiresResult.modifications);
+      category = 'ADAPTED';
+    }
+
+    // Check for Node-only features
+    const compatibility = this.checkBrowserCompatibility(transformed);
+    if (!compatibility.compatible) {
+      category = 'NOT_APPLICABLE';
+      return {
+        code: transformed,
+        category,
+        reason: compatibility.reason,
+        modifications
+      };
+    }
+
+    // Transform assertions
+    const assertResult = this.transformAssertions(transformed);
+    transformed = assertResult.code;
+    if (assertResult.modified) {
+      modifications.push(...assertResult.modifications);
+      category = 'ADAPTED';
+    }
+
+    // Wrap the test code for execution
+    const wrapped = this.wrapTestCode(transformed, metadata);
+
+    return {
+      code: wrapped,
+      category,
+      modifications,
+      metadata: {
+        ...metadata,
+        transformed: true,
+        category
+      }
+    };
+  }
+
+  /**
+   * Strip 'use strict' declarations
+   */
+  stripUseStrict(code) {
+    return code.replace(/^['"]use strict['"];?\s*\n?/gm, '');
+  }
+
+  /**
+   * Transform require statements to browser equivalents
+   */
+  transformRequires(code) {
+    let modified = false;
+    const modifications = [];
+    let transformed = code;
+
+    // Map of require transformations
+    const requireMap = {
+      '../': 'window.browseress.express',
+      '..': 'window.browseress.express',
+      'express': 'window.browseress.express',
+      'supertest': 'window.supertest',
+      'node:assert': 'window.assert',
+      'assert': 'window.assert',
+      'after': 'window.after',
+      './support/utils': 'window.testUtils',
+      '../lib/utils': 'window.expressUtils'  // Express internal utils - separate from test utils
+    };
+
+    // Transform require statements
+    Object.entries(requireMap).forEach(([from, to]) => {
+      const patterns = [
+        // var/const/let name = require('module')
+        new RegExp(`(var|const|let)\\s+(\\w+)\\s*=\\s*require\\s*\\(\\s*['"]${from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]\\s*\\)`, 'g'),
+        // Direct require without assignment
+        new RegExp(`require\\s*\\(\\s*['"]${from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]\\s*\\)`, 'g')
+      ];
+
+      patterns.forEach(pattern => {
+        if (pattern.test(transformed)) {
+          modified = true;
+          if (from === '../' || from === '..' || from === 'express') {
+            modifications.push('Transformed Express require');
+          } else {
+            modifications.push(`Transformed ${from} require`);
+          }
+        }
+        
+        // Replace with assignment
+        transformed = transformed.replace(
+          patterns[0],
+          `$1 $2 = ${to}`
+        );
+        
+        // Replace direct requires
+        transformed = transformed.replace(
+          patterns[1],
+          to
+        );
+      });
+    });
+
+    // Handle destructuring requires
+    // e.g., var { methods } = require('../lib/utils')
+    transformed = transformed.replace(
+      /(var|const|let)\s*{\s*([^}]+)\s*}\s*=\s*require\s*\(\s*['"][^'"]+['"]\s*\)/g,
+      (match, declType, destructured) => {
+        modified = true;
+        modifications.push('Transformed destructuring require');
+        // For now, assume utils are on window.testUtils
+        return `${declType} { ${destructured} } = window.testUtils || {}`;
+      }
+    );
+    
+    // Handle Buffer requires specially
+    transformed = transformed.replace(
+      /(const|let|var)\s*{\s*Buffer\s*}\s*=\s*require\s*\(\s*['"]node:buffer['"]\s*\)/g,
+      '$1 { Buffer } = { Buffer: window.testUtils?.Buffer || window.Buffer }'
+    );
+    
+    // CRITICAL: Check for any remaining unhandled require statements
+    const remainingRequires = transformed.match(/require\s*\(\s*['"]([^'"]+)['"]\s*\)/g);
+    if (remainingRequires) {
+      // Extract the module names for better error reporting
+      const unhandledModules = remainingRequires.map(req => {
+        const match = req.match(/require\s*\(\s*['"]([^'"]+)['"]\s*\)/);
+        return match ? match[1] : req;
+      });
+      
+      const error = new Error(`Unhandled require statements found: ${unhandledModules.join(', ')}`);
+      console.error('[Transformer] Unhandled requires:', unhandledModules);
+      modifications.push(`ERROR: Unhandled requires: ${unhandledModules.join(', ')}`);
+      
+      // Return error state but don't throw - let the UI show the error
+      return { 
+        code: transformed, 
+        modified: true, 
+        modifications,
+        error: error.message,
+        unhandledRequires: unhandledModules
+      };
+    }
+
+    return { code: transformed, modified, modifications };
+  }
+
+  /**
+   * Check if code is browser compatible
+   */
+  checkBrowserCompatibility(code) {
+    // List of Node-only modules/features
+    const nodeOnlyPatterns = [
+      { pattern: /require\s*\(\s*['"]fs['"]/, reason: 'Uses Node.js fs module' },
+      { pattern: /require\s*\(\s*['"]child_process['"]/, reason: 'Uses child_process module' },
+      { pattern: /require\s*\(\s*['"]cluster['"]/, reason: 'Uses cluster module' },
+      { pattern: /require\s*\(\s*['"]crypto['"]/, reason: 'Uses crypto module' },
+      { pattern: /process\.exit/, reason: 'Uses process.exit()' },
+      { pattern: /__dirname/, reason: 'Uses __dirname' },
+      { pattern: /__filename/, reason: 'Uses __filename' }
+    ];
+
+    for (const { pattern, reason } of nodeOnlyPatterns) {
+      if (pattern.test(code)) {
+        return { compatible: false, reason };
+      }
+    }
+
+    return { compatible: true };
+  }
+
+  /**
+   * Transform assertion statements
+   */
+  transformAssertions(code) {
+    let modified = false;
+    const modifications = [];
+    let transformed = code;
+
+    // Transform assert.strictEqual to expect().toBe()
+    transformed = transformed.replace(
+      /assert\.strictEqual\s*\(\s*([^,]+),\s*([^)]+)\)/g,
+      (match, actual, expected) => {
+        modified = true;
+        modifications.push('Transformed assert.strictEqual to expect');
+        return `expect(${actual.trim()}).toBe(${expected.trim()})`;
+      }
+    );
+
+    // Transform assert.equal to expect().toBe()
+    transformed = transformed.replace(
+      /assert\.equal\s*\(\s*([^,]+),\s*([^)]+)\)/g,
+      (match, actual, expected) => {
+        modified = true;
+        modifications.push('Transformed assert.equal to expect');
+        return `expect(${actual.trim()}).toBe(${expected.trim()})`;
+      }
+    );
+
+    // Transform assert.deepEqual to expect().toEqual()
+    transformed = transformed.replace(
+      /assert\.deepEqual\s*\(\s*([^,]+),\s*([^)]+)\)/g,
+      (match, actual, expected) => {
+        modified = true;
+        modifications.push('Transformed assert.deepEqual to expect');
+        return `expect(${actual.trim()}).toEqual(${expected.trim()})`;
+      }
+    );
+
+    // Transform assert(condition) to expect(condition).toBeTruthy()
+    transformed = transformed.replace(
+      /assert\s*\(\s*([^)]+)\)/g,
+      (match, condition) => {
+        // Skip if it's assert.something
+        if (match.includes('assert.')) return match;
+        modified = true;
+        modifications.push('Transformed assert() to expect');
+        return `expect(${condition.trim()}).toBeTruthy()`;
+      }
+    );
+
+    return { code: transformed, modified, modifications };
+  }
+
+  /**
+   * Wrap test code in an executable function
+   */
+  wrapTestCode(code, metadata) {
+    // Create a function that can be executed with proper context
+    const wrapped = `
+(function(context) {
+  // Destructure context
+  const { 
+    describe, it, before, after, beforeEach, afterEach,
+    expect, assert, request, express, app, transport,
+    after: afterUtil, testUtils
+  } = context;
+  
+  // Create a wrapper for the test
+  const runTest = function() {
+    ${code}
+  };
+  
+  // Execute the test
+  try {
+    runTest();
+    return { success: true };
+  } catch (error) {
+    return { 
+      success: false, 
+      error: error.message,
+      stack: error.stack 
+    };
+  }
+})`;
+
+    return wrapped;
+  }
+
+  /**
+   * Categorize a test based on its content and transformations
+   */
+  categorizeTest(code, modifications) {
+    // If no modifications were needed, it's a PASS
+    if (!modifications || modifications.length === 0) {
+      return 'PASS';
+    }
+
+    // If we made adaptations, it's ADAPTED
+    if (modifications.length > 0) {
+      return 'ADAPTED';
+    }
+
+    return 'PASS';
+  }
+
+  /**
+   * Create a detailed transformation report
+   */
+  createTransformationReport(originalCode, transformedResult) {
+    const report = {
+      category: transformedResult.category,
+      modifications: transformedResult.modifications,
+      lineCount: {
+        original: originalCode.split('\n').length,
+        transformed: transformedResult.code.split('\n').length
+      },
+      requiresTransformed: transformedResult.modifications.filter(m => 
+        m.includes('require')).length,
+      assertionsTransformed: transformedResult.modifications.filter(m => 
+        m.includes('assert')).length
+    };
+
+    return report;
+  }
+}
+
+// Export for use in test harness
+window.TestTransformer = TestTransformer;
