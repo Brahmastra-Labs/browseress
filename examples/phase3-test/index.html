@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Browseress Phase 3: View Rendering Test</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 1000px;
+      margin: 40px auto;
+      padding: 0 20px;
+      line-height: 1.6;
+    }
+    h1 { color: #333; }
+    .status {
+      padding: 10px;
+      border-radius: 4px;
+      margin: 20px 0;
+      font-weight: bold;
+    }
+    .status.connected { background: #d4edda; color: #155724; }
+    .status.disconnected { background: #f8d7da; color: #721c24; }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+      margin: 5px;
+    }
+    button:hover:not(:disabled) { background: #0056b3; }
+    button:disabled { 
+      background: #6c757d; 
+      cursor: not-allowed;
+    }
+    .test-section {
+      border: 1px solid #dee2e6;
+      border-radius: 4px;
+      padding: 20px;
+      margin: 20px 0;
+    }
+    .template-editor {
+      margin: 20px 0;
+    }
+    textarea {
+      width: 100%;
+      min-height: 150px;
+      padding: 10px;
+      border: 1px solid #ced4da;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 14px;
+    }
+    input[type="text"] {
+      width: 300px;
+      padding: 8px;
+      border: 1px solid #ced4da;
+      border-radius: 4px;
+      margin: 5px;
+    }
+    .rendered-output {
+      border: 2px solid #28a745;
+      border-radius: 4px;
+      padding: 20px;
+      margin: 20px 0;
+      background: #f8f9fa;
+    }
+    .error-output {
+      border: 2px solid #dc3545;
+      border-radius: 4px;
+      padding: 20px;
+      margin: 20px 0;
+      background: #f8d7da;
+      color: #721c24;
+    }
+    pre {
+      background: #e9ecef;
+      padding: 15px;
+      border-radius: 4px;
+      overflow-x: auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>Browseress Phase 3: View Rendering Test</h1>
+  
+  <div class="status disconnected" id="status">Disconnected</div>
+  
+  <div>
+    <button id="startBtn">Start Server</button>
+    <button id="stopBtn" disabled>Stop Server</button>
+  </div>
+
+  <div class="test-section">
+    <h2>Template Setup</h2>
+    <p>First, create some template files in OPFS:</p>
+    <button id="createTemplatesBtn" disabled>Create Default Templates</button>
+  </div>
+
+  <div class="test-section">
+    <h2>Test Rendering</h2>
+    
+    <h3>1. Basic EJS Rendering</h3>
+    <button id="testBasicEjsBtn" disabled>Test EJS Template</button>
+    
+    <h3>2. Locals and Data Passing</h3>
+    <button id="testLocalsBtn" disabled>Test with Locals</button>
+    
+    <h3>3. Layout/Partials</h3>
+    <button id="testLayoutBtn" disabled>Test Layout System</button>
+    
+    <h3>4. Error Handling</h3>
+    <button id="testErrorBtn" disabled>Test Template Error</button>
+    
+    <h3>5. View Caching</h3>
+    <button id="testCachingBtn" disabled>Test View Cache</button>
+  </div>
+
+  <div class="test-section">
+    <h2>Custom Template Editor</h2>
+    <div class="template-editor">
+      <input type="text" id="templateName" placeholder="Template name (e.g., custom.ejs)" />
+      <textarea id="templateContent" placeholder="Enter EJS template content...">
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+  &lt;title&gt;&lt;%= title %&gt;&lt;/title&gt;
+&lt;/head&gt;
+&lt;body&gt;
+  &lt;h1&gt;&lt;%= heading %&gt;&lt;/h1&gt;
+  &lt;p&gt;&lt;%= message %&gt;&lt;/p&gt;
+&lt;/body&gt;
+&lt;/html&gt;</textarea>
+      <button id="createTemplateBtn" disabled>Create Template</button>
+      <button id="renderCustomBtn" disabled>Render Custom Template</button>
+    </div>
+  </div>
+
+  <div class="test-section">
+    <h2>Output</h2>
+    <div id="output"></div>
+  </div>
+
+  <script src="../../dist/browseress.bundle.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/ejs@3.1.9/ejs.min.js"></script>
+  <script>
+    let app;
+    let transport;
+    const express = window.browseress.express;
+    const fs = window.browseress.fs;
+    
+    const statusEl = document.getElementById('status');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const outputEl = document.getElementById('output');
+    
+    function updateStatus(status) {
+      statusEl.textContent = status;
+      statusEl.className = 'status ' + status.toLowerCase();
+      
+      const isConnected = status === 'Connected';
+      stopBtn.disabled = !isConnected;
+      startBtn.disabled = isConnected;
+      
+      // Enable/disable test buttons
+      document.getElementById('createTemplatesBtn').disabled = !isConnected;
+      document.getElementById('testBasicEjsBtn').disabled = !isConnected;
+      document.getElementById('testLocalsBtn').disabled = !isConnected;
+      document.getElementById('testLayoutBtn').disabled = !isConnected;
+      document.getElementById('testErrorBtn').disabled = !isConnected;
+      document.getElementById('testCachingBtn').disabled = !isConnected;
+      document.getElementById('createTemplateBtn').disabled = !isConnected;
+      document.getElementById('renderCustomBtn').disabled = !isConnected;
+    }
+    
+    function showOutput(html, isError = false) {
+      outputEl.innerHTML = `
+        <div class="${isError ? 'error-output' : 'rendered-output'}">
+          ${isError ? '<h3>Error:</h3>' : '<h3>Rendered Output:</h3>'}
+          ${html}
+        </div>
+      `;
+    }
+    
+    function showRawOutput(title, content) {
+      outputEl.innerHTML = `
+        <h3>${title}</h3>
+        <pre>${content}</pre>
+      `;
+    }
+    
+    // Create default templates
+    document.getElementById('createTemplatesBtn').addEventListener('click', async () => {
+      try {
+        
+        // Use async methods instead of sync to avoid Atomics.wait issue
+        // Create views directory
+        await fs.mkdir('/views', { recursive: true });
+        
+        // Basic template
+        await fs.writeFile('/views/index.ejs', `
+<!DOCTYPE html>
+<html>
+<head>
+  <title><%= title %></title>
+</head>
+<body>
+  <h1>Welcome to <%= title %></h1>
+  <p>This is a basic EJS template rendered in the browser!</p>
+  <p>Current time: <%= new Date().toLocaleString() %></p>
+</body>
+</html>
+        `);
+        
+        // User profile template
+        await fs.writeFile('/views/user.ejs', `
+<!DOCTYPE html>
+<html>
+<head>
+  <title>User Profile</title>
+</head>
+<body>
+  <h1>User Profile</h1>
+  <div class="profile">
+    <h2><%= user.name %></h2>
+    <p>Email: <%= user.email %></p>
+    <p>Member since: <%= user.joinDate %></p>
+    <% if (user.premium) { %>
+      <span class="badge">Premium Member</span>
+    <% } %>
+  </div>
+  <h3>Interests:</h3>
+  <ul>
+    <% user.interests.forEach(function(interest) { %>
+      <li><%= interest %></li>
+    <% }); %>
+  </ul>
+</body>
+</html>
+        `);
+        
+        // Layout template
+        await fs.writeFile('/views/layout.ejs', `
+<!DOCTYPE html>
+<html>
+<head>
+  <title><%= title || 'My App' %></title>
+  <style>
+    .header { background: #333; color: white; padding: 20px; }
+    .content { padding: 20px; }
+    .footer { background: #f0f0f0; padding: 20px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>My Application</h1>
+    <nav>
+      <a href="/">Home</a> | 
+      <a href="/about">About</a> | 
+      <a href="/contact">Contact</a>
+    </nav>
+  </div>
+  <div class="content">
+    <%- body %>
+  </div>
+  <div class="footer">
+    <p>&copy; 2024 My Application. Rendered with Browseress!</p>
+  </div>
+</body>
+</html>
+        `);
+        
+        // Page using layout
+        await fs.writeFile('/views/page.ejs', `
+<h2><%= pageTitle %></h2>
+<p><%= content %></p>
+<p>This page uses a layout!</p>
+        `);
+        
+        // Error template
+        await fs.writeFile('/views/error.ejs', `
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Error</title>
+</head>
+<body>
+  <h1>Error <%= error.status || 500 %></h1>
+  <p><%= error.message %></p>
+  <% if (error.stack && showStack) { %>
+    <pre><%= error.stack %></pre>
+  <% } %>
+</body>
+</html>
+        `);
+        
+        showOutput('Templates created successfully in /views/', false);
+      } catch (err) {
+        showOutput('Error creating templates: ' + err.message, true);
+      }
+    });
+    
+    startBtn.addEventListener('click', async () => {
+      try {
+        updateStatus('Connecting');
+        outputEl.innerHTML = '';
+        
+        // Create Express app
+        app = express();
+        
+        // Register EJS engine BEFORE setting view engine
+        app.engine('ejs', async (filepath, options, callback) => {
+          try {
+            // Use async readFile to avoid sync operations
+            const content = await fs.readFile(filepath, 'utf8');
+            const html = ejs.render(content, options);
+            callback(null, html);
+          } catch (err) {
+            callback(err);
+          }
+        });
+        
+        // Configure view engine
+        app.set('view engine', 'ejs');
+        app.set('views', '/views');
+        
+        // Set up app locals
+        app.locals.appName = 'Browseress Phase 3';
+        app.locals.version = '1.0.0';
+        
+        // Routes
+        app.get('/basic', (req, res) => {
+          res.render('index', {
+            title: 'Browseress View Rendering'
+          });
+        });
+        
+        app.get('/user/:id', (req, res) => {
+          // Simulate user data
+          const userData = {
+            id: req.params.id,
+            name: 'John Doe',
+            email: 'john@example.com',
+            joinDate: new Date('2023-01-15').toLocaleDateString(),
+            premium: true,
+            interests: ['JavaScript', 'WebAssembly', 'Edge Computing']
+          };
+          
+          res.render('user', { user: userData });
+        });
+        
+        app.get('/with-locals', (req, res) => {
+          // Middleware to set res.locals
+          res.locals.timestamp = new Date().toISOString();
+          res.locals.requestId = Math.random().toString(36).substr(2, 9);
+          
+          res.render('index', {
+            title: 'Testing Locals',
+            // These will be merged with app.locals and res.locals
+            custom: 'This is a custom value'
+          });
+        });
+        
+        app.get('/layout-test', (req, res) => {
+          // Simulate layout rendering
+          res.render('page', {
+            title: 'Page with Layout',
+            pageTitle: 'About Us',
+            content: 'This is the about page content.',
+            layout: 'layout'
+          });
+        });
+        
+        app.get('/error-test', (req, res) => {
+          res.render('nonexistent', (err, html) => {
+            if (err) {
+              res.status(500).render('error', {
+                error: err,
+                showStack: true
+              });
+            } else {
+              res.send(html);
+            }
+          });
+        });
+        
+        app.get('/custom/:template', (req, res) => {
+          const data = {
+            title: 'Custom Template',
+            heading: 'Rendered from Custom Template',
+            message: 'This template was created in the browser!',
+            timestamp: new Date().toLocaleString()
+          };
+          
+          res.render(req.params.template, data);
+        });
+        
+        // Create WebSocket transport
+        transport = new window.browseress.WebSocketTransport('ws://localhost:3001');
+        
+        // Listen with transport
+        await new Promise((resolve, reject) => {
+          transport.on('connect', () => {
+            updateStatus('Connected');
+            resolve();
+          });
+          
+          transport.on('error', (err) => {
+            console.error('Transport error:', err);
+            updateStatus('Error: ' + err.message);
+            reject(err);
+          });
+          
+          app.listen(transport);
+        });
+        
+      } catch (err) {
+        console.error('Failed to start:', err);
+        updateStatus('Failed to connect');
+        showOutput('Startup error: ' + err.message, true);
+      }
+    });
+    
+    stopBtn.addEventListener('click', () => {
+      if (transport) {
+        transport.close();
+        transport = null;
+        app = null;
+      }
+      updateStatus('Disconnected');
+      outputEl.innerHTML = '';
+    });
+    
+    // Test buttons
+    document.getElementById('testBasicEjsBtn').addEventListener('click', async () => {
+      try {
+        const response = await fetch('http://localhost:8080/basic');
+        const html = await response.text();
+        showOutput(html);
+      } catch (err) {
+        showOutput('Error: ' + err.message, true);
+      }
+    });
+    
+    document.getElementById('testLocalsBtn').addEventListener('click', async () => {
+      try {
+        const response = await fetch('http://localhost:8080/with-locals');
+        const html = await response.text();
+        showOutput(html);
+      } catch (err) {
+        showOutput('Error: ' + err.message, true);
+      }
+    });
+    
+    document.getElementById('testLayoutBtn').addEventListener('click', async () => {
+      try {
+        // For now, we'll simulate layout by rendering both templates
+        const response = await fetch('http://localhost:8080/layout-test');
+        const html = await response.text();
+        showOutput(html);
+      } catch (err) {
+        showOutput('Error: ' + err.message, true);
+      }
+    });
+    
+    document.getElementById('testErrorBtn').addEventListener('click', async () => {
+      try {
+        const response = await fetch('http://localhost:8080/error-test');
+        const html = await response.text();
+        showOutput(html);
+      } catch (err) {
+        showOutput('Error: ' + err.message, true);
+      }
+    });
+    
+    document.getElementById('testCachingBtn').addEventListener('click', async () => {
+      try {
+        showRawOutput('View Caching Test', 'Making multiple requests to test caching...');
+        
+        const start = performance.now();
+        
+        // First request (cache miss)
+        const response1 = await fetch('http://localhost:8080/user/1');
+        const time1 = performance.now() - start;
+        
+        // Second request (should be cached)
+        const start2 = performance.now();
+        const response2 = await fetch('http://localhost:8080/user/2');
+        const time2 = performance.now() - start2;
+        
+        // Third request (should be cached)
+        const start3 = performance.now();
+        const response3 = await fetch('http://localhost:8080/user/3');
+        const time3 = performance.now() - start3;
+        
+        showRawOutput('View Caching Results', `
+First request: ${time1.toFixed(2)}ms (cache miss)
+Second request: ${time2.toFixed(2)}ms (${time2 < time1 ? 'cached' : 'not cached'})
+Third request: ${time3.toFixed(2)}ms (${time3 < time1 ? 'cached' : 'not cached'})
+
+Cache enabled: ${app.enabled('view cache')}
+Environment: ${app.get('env')}
+        `);
+      } catch (err) {
+        showOutput('Error: ' + err.message, true);
+      }
+    });
+    
+    // Custom template creation
+    document.getElementById('createTemplateBtn').addEventListener('click', async () => {
+      const name = document.getElementById('templateName').value;
+      const content = document.getElementById('templateContent').value;
+      
+      if (!name || !content) {
+        showOutput('Please enter both template name and content', true);
+        return;
+      }
+      
+      try {
+        const path = name.startsWith('/') ? name : `/views/${name}`;
+        await fs.writeFile(path, content);
+        showOutput(`Template created at: ${path}`, false);
+      } catch (err) {
+        showOutput('Error creating template: ' + err.message, true);
+      }
+    });
+    
+    document.getElementById('renderCustomBtn').addEventListener('click', async () => {
+      const name = document.getElementById('templateName').value;
+      if (!name) {
+        showOutput('Please enter a template name', true);
+        return;
+      }
+      
+      try {
+        const templateName = name.replace(/\.ejs$/, '').replace(/^\/views\//, '');
+        const response = await fetch(`http://localhost:8080/custom/${templateName}`);
+        const html = await response.text();
+        showOutput(html);
+      } catch (err) {
+        showOutput('Error: ' + err.message, true);
+      }
+    });
+  </script>
+</body>
+</html>

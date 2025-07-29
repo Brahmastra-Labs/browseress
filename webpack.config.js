@@ -36,6 +36,10 @@ module.exports = {
     ]
   },
   resolve: {
+    alias: {
+      // Replace Express's view.js with our browser-compatible version
+      './view': path.resolve(__dirname, 'lib/polyfills/view-browser.js')
+    },
     fallback: {
       // Node.js polyfills for browser
       'events': require.resolve('events/'),
