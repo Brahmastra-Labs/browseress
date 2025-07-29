@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>OPFS Polyfill Tests</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/mocha/10.2.0/mocha.css">
+</head>
+<body>
+  <div id="mocha"></div>
+  
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mocha/10.2.0/mocha.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chai/4.3.7/chai.js"></script>
+  <script>
+    mocha.setup('bdd');
+    var assert = chai.assert;
+  </script>
+  
+  <!-- Inline the OPFS adapter for testing (in production this would be bundled) -->
+  <script>
+    // Mock Buffer for browser
+    window.Buffer = {
+      from: (data) => {
+        if (typeof data === 'string') {
+          return new TextEncoder().encode(data);
+        }
+        return new Uint8Array(data);
+      },
+      concat: (chunks) => {
+        const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+        const result = new Uint8Array(totalLength);
+        let offset = 0;
+        chunks.forEach(chunk => {
+          result.set(chunk, offset);
+          offset += chunk.length;
+        });
+        return result;
+      },
+      isBuffer: (obj) => obj instanceof Uint8Array
+    };
+    
+    // For now, let's test the browser environment setup
+    describe('Browser Environment', function(){
+      it('should have required browser APIs', function(){
+        assert.equal(typeof window, 'object');
+        assert.equal(typeof navigator, 'object');
+        assert.equal(typeof Worker, 'function');
+      });
+      
+      it('should have OPFS available', function(){
+        assert.equal(typeof navigator.storage, 'object');
+        assert.equal(typeof navigator.storage.getDirectory, 'function');
+      });
+      
+      it('should have SharedArrayBuffer for synchronous operations', function(){
+        // This test should FAIL if SharedArrayBuffer is not available
+        // because our OPFS adapter requires it for synchronous operations
+        assert.equal(typeof SharedArrayBuffer, 'function', 
+          'SharedArrayBuffer is required but not available. Run server with COOP/COEP headers.');
+        assert.equal(typeof Atomics, 'object', 
+          'Atomics is required but not available. Run server with COOP/COEP headers.');
+      });
+    });
+    
+    // Basic OPFS functionality tests
+    describe('OPFS Basic Operations', function(){
+      let root;
+      
+      before(async function(){
+        root = await navigator.storage.getDirectory();
+      });
+      
+      afterEach(async function(){
+        // Clean up test files
+        try {
+          await root.removeEntry('test.txt', { recursive: true });
+        } catch (e) {}
+        try {
+          await root.removeEntry('testdir', { recursive: true });
+        } catch (e) {}
+      });
+      
+      it('should create and read a file', async function(){
+        const fileHandle = await root.getFileHandle('test.txt', { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write('Hello OPFS!');
+        await writable.close();
+        
+        const file = await fileHandle.getFile();
+        const text = await file.text();
+        assert.equal(text, 'Hello OPFS!');
+      });
+      
+      it('should create a directory', async function(){
+        const dirHandle = await root.getDirectoryHandle('testdir', { create: true });
+        assert.equal(dirHandle.kind, 'directory');
+        assert.equal(dirHandle.name, 'testdir');
+      });
+      
+      it('should list directory contents', async function(){
+        await root.getFileHandle('test.txt', { create: true });
+        await root.getDirectoryHandle('testdir', { create: true });
+        
+        const entries = [];
+        for await (const entry of root.values()) {
+          entries.push(entry.name);
+        }
+        
+        assert.include(entries, 'test.txt');
+        assert.include(entries, 'testdir');
+      });
+      
+      it('should delete files and directories', async function(){
+        // Create a file
+        await root.getFileHandle('test.txt', { create: true });
+        
+        // Verify it exists by listing directory
+        let entries = [];
+        for await (const entry of root.values()) {
+          entries.push(entry.name);
+        }
+        assert.include(entries, 'test.txt', 'File should exist before deletion');
+        
+        // Delete the file
+        await root.removeEntry('test.txt');
+        
+        // Verify it's gone by listing directory again
+        entries = [];
+        for await (const entry of root.values()) {
+          entries.push(entry.name);
+        }
+        assert.notInclude(entries, 'test.txt', 'File should not exist after deletion');
+      });
+    });
+    
+    // Note about full adapter tests
+    describe('OPFS Adapter', function(){
+      it('requires webpack bundling to test the full adapter', function(){
+        // The actual fs-opfs-adapter.js needs to be bundled with webpack
+        // to handle the worker import and module system
+        console.log('Full adapter tests require webpack bundling.');
+        console.log('Run: npm run build:browser (once configured)');
+        this.skip();
+      });
+    });
+    
+    mocha.run();
+  </script>
+</body>
+</html>

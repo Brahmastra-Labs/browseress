@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>WebSocket Transport Tests</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/mocha/10.2.0/mocha.css">
+</head>
+<body>
+  <div id="mocha"></div>
+  
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mocha/10.2.0/mocha.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chai/4.3.7/chai.js"></script>
+  <script>
+    mocha.setup('bdd');
+    var assert = chai.assert;
+    
+    // Simple EventEmitter implementation for browser
+    class EventEmitter {
+      constructor() {
+        this._events = {};
+      }
+      
+      on(event, listener) {
+        if (!this._events[event]) {
+          this._events[event] = [];
+        }
+        this._events[event].push(listener);
+        return this;
+      }
+      
+      emit(event, ...args) {
+        if (this._events[event]) {
+          this._events[event].forEach(listener => listener(...args));
+        }
+        return this;
+      }
+      
+      off(event, listener) {
+        if (this._events[event]) {
+          this._events[event] = this._events[event].filter(l => l !== listener);
+        }
+        return this;
+      }
+    }
+    
+    // WebSocketTransport class for browser
+    class WebSocketTransport extends EventEmitter {
+      constructor(url) {
+        super();
+        this.url = url;
+        this.ws = null;
+        this.connected = false;
+        this.requestId = 0;
+        this.pendingRequests = new Map();
+        this.reconnectAttempts = 0;
+        this.maxReconnectAttempts = 5;
+        this.reconnectDelay = 1000;
+      }
+      
+      connect() {
+        return new Promise((resolve, reject) => {
+          if (this.connected) {
+            resolve();
+            return;
+          }
+          
+          if (!window.WebSocket) {
+            reject(new Error('WebSocket not available in this browser'));
+            return;
+          }
+          
+          this.ws = new WebSocket(this.url);
+          this.ws.binaryType = 'arraybuffer';
+          
+          this.ws.onopen = () => {
+            this.connected = true;
+            this.reconnectAttempts = 0;
+            this.emit('connect');
+            resolve();
+          };
+          
+          this.ws.onmessage = (event) => {
+            this._handleMessage(event.data);
+          };
+          
+          this.ws.onerror = (error) => {
+            this.emit('error', error);
+          };
+          
+          this.ws.onclose = () => {
+            this.connected = false;
+            this.emit('disconnect');
+            this._handleDisconnect();
+          };
+          
+          setTimeout(() => {
+            if (!this.connected) {
+              this.ws.close();
+              reject(new Error('Connection timeout'));
+            }
+          }, 10000);
+        });
+      }
+      
+      sendRequest(request, callback) {
+        const id = ++this.requestId;
+        
+        const message = {
+          id,
+          type: 'request',
+          method: request.method,
+          url: request.url,
+          headers: request.headers,
+          body: request.body
+        };
+        
+        this.pendingRequests.set(id, {
+          request,
+          callback,
+          timestamp: Date.now()
+        });
+        
+        this._send(message);
+        
+        setTimeout(() => {
+          if (this.pendingRequests.has(id)) {
+            this.pendingRequests.delete(id);
+            callback(new Error('Request timeout'));
+          }
+        }, 30000);
+        
+        return id;
+      }
+      
+      close() {
+        if (this.ws) {
+          this.ws.close();
+          this.ws = null;
+          this.connected = false;
+        }
+      }
+      
+      _send(message) {
+        if (!this.connected || !this.ws) {
+          this.emit('error', new Error('Not connected'));
+          return;
+        }
+        
+        try {
+          this.ws.send(JSON.stringify(message));
+        } catch (error) {
+          this.emit('error', error);
+        }
+      }
+      
+      _handleMessage(data) {
+        try {
+          const message = JSON.parse(data);
+          
+          if (message.type === 'response' && message.id) {
+            const pending = this.pendingRequests.get(message.id);
+            if (pending) {
+              this.pendingRequests.delete(message.id);
+              
+              const response = {
+                statusCode: message.statusCode,
+                statusMessage: message.statusMessage,
+                headers: message.headers,
+                body: message.body
+              };
+              
+              pending.callback(null, response);
+            }
+          } else if (message.type === 'error' && message.id) {
+            const pending = this.pendingRequests.get(message.id);
+            if (pending) {
+              this.pendingRequests.delete(message.id);
+              pending.callback(new Error(message.error));
+            }
+          } else if (message.type === 'server-push') {
+            this.emit('server-message', message);
+          }
+        } catch (error) {
+          this.emit('error', error);
+        }
+      }
+      
+      _handleDisconnect() {
+        for (const [id, pending] of this.pendingRequests) {
+          pending.callback(new Error('Connection lost'));
+        }
+        this.pendingRequests.clear();
+        
+        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+          this.reconnectAttempts++;
+          this.emit('reconnecting', this.reconnectAttempts);
+          
+          setTimeout(() => {
+            this.connect().catch(() => {});
+          }, this.reconnectDelay * this.reconnectAttempts);
+        } else {
+          this.emit('reconnect-failed');
+        }
+      }
+      
+      isReady() {
+        return this.connected && this.ws && this.ws.readyState === 1;
+      }
+      
+      getStats() {
+        return {
+          connected: this.connected,
+          pendingRequests: this.pendingRequests.size,
+          reconnectAttempts: this.reconnectAttempts,
+          url: this.url
+        };
+      }
+    }
+    
+    // Tests
+    describe('Browser WebSocket Transport', function(){
+      it('should have WebSocket available', function(){
+        assert.equal(typeof WebSocket, 'function');
+      });
+      
+      it('should create transport instance', function(){
+        var transport = new WebSocketTransport('ws://localhost:8080');
+        assert.ok(transport instanceof WebSocketTransport);
+        assert.ok(transport instanceof EventEmitter);
+        assert.equal(transport.url, 'ws://localhost:8080');
+        assert.equal(transport.connected, false);
+      });
+      
+      it('should handle connection lifecycle', function(done){
+        this.timeout(11000); // Increased to 11 seconds since connection timeout is 10 seconds
+        
+        var transport = new WebSocketTransport('ws://invalid.example.com:9999');
+        var events = [];
+        
+        transport.on('error', function(){ events.push('error'); });
+        transport.on('disconnect', function(){ events.push('disconnect'); });
+        transport.on('reconnecting', function(){ events.push('reconnecting'); });
+        
+        transport.connect().catch(function(err){
+          assert.ok(err instanceof Error);
+          assert.equal(err.message, 'Connection timeout');
+          done();
+        });
+      });
+      
+      it('should manage pending requests', function(){
+        var transport = new WebSocketTransport('ws://localhost:8080');
+        transport.connected = true;
+        transport.ws = { 
+          send: function(){}, 
+          readyState: 1,
+          close: function(){} // Added mock close method
+        };
+        
+        var id1 = transport.sendRequest({
+          method: 'GET',
+          url: '/test',
+          headers: { 'Accept': 'application/json' }
+        }, function(){});
+        
+        var id2 = transport.sendRequest({
+          method: 'POST',
+          url: '/data',
+          body: 'test'
+        }, function(){});
+        
+        assert.equal(id1, 1);
+        assert.equal(id2, 2);
+        assert.equal(transport.pendingRequests.size, 2);
+        
+        // Clean up
+        transport.close();
+      });
+      
+      it('should handle response messages', function(done){
+        var transport = new WebSocketTransport('ws://localhost:8080');
+        
+        transport.pendingRequests.set(1, {
+          callback: function(err, response){
+            assert.equal(err, null);
+            assert.equal(response.statusCode, 200);
+            assert.equal(response.body, 'Success');
+            done();
+          }
+        });
+        
+        transport._handleMessage(JSON.stringify({
+          id: 1,
+          type: 'response',
+          statusCode: 200,
+          statusMessage: 'OK',
+          headers: {},
+          body: 'Success'
+        }));
+      });
+      
+      it('should emit events', function(done){
+        var transport = new WebSocketTransport('ws://localhost:8080');
+        var eventCount = 0;
+        
+        transport.on('server-message', function(message){
+          eventCount++;
+          assert.equal(message.type, 'server-push');
+          assert.equal(message.data, 'test data');
+          
+          if (eventCount === 1) {
+            done();
+          }
+        });
+        
+        transport._handleMessage(JSON.stringify({
+          type: 'server-push',
+          data: 'test data'
+        }));
+      });
+      
+      it('should provide connection stats', function(){
+        var transport = new WebSocketTransport('ws://localhost:8080');
+        var stats = transport.getStats();
+        
+        assert.equal(typeof stats, 'object');
+        assert.equal(stats.connected, false);
+        assert.equal(stats.pendingRequests, 0);
+        assert.equal(stats.reconnectAttempts, 0);
+        assert.equal(stats.url, 'ws://localhost:8080');
+      });
+    });
+    
+    // Note about integration tests
+    describe('WebSocket Integration', function(){
+      it('requires a relay server to test real connections', function(){
+        console.log('Full integration tests require:');
+        console.log('1. A running relay server');
+        console.log('2. Webpack bundle of the transport');
+        console.log('3. Modified Express.js with transport support');
+        this.skip();
+      });
+    });
+    
+    mocha.run();
+  </script>
+</body>
+</html>
