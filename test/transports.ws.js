@@ -6,6 +6,15 @@ var EventEmitter = require('events')
 describe('transports', function(){
   describe('WebSocket transport', function(){
     var WebSocketTransport = require('../lib/transports/ws-transport')
+    var transports = []
+    
+    afterEach(function(){
+      // Clean up all created transports
+      transports.forEach(function(transport){
+        transport.close()
+      })
+      transports = []
+    })
     
     it('should export WebSocketTransport class', function(){
       assert.strictEqual(typeof WebSocketTransport, 'function')
@@ -18,6 +27,7 @@ describe('transports', function(){
     
     it('should create transport instance', function(){
       var transport = new WebSocketTransport('ws://localhost:8080')
+      transports.push(transport)
       assert.ok(transport instanceof WebSocketTransport)
       assert.ok(transport instanceof EventEmitter)
       assert.strictEqual(transport.url, 'ws://localhost:8080')
@@ -26,27 +36,32 @@ describe('transports', function(){
     
     it('should have connect method', function(){
       var transport = new WebSocketTransport('ws://localhost:8080')
+      transports.push(transport)
       assert.strictEqual(typeof transport.connect, 'function')
     })
     
     it('should have sendRequest method', function(){
       var transport = new WebSocketTransport('ws://localhost:8080')
+      transports.push(transport)
       assert.strictEqual(typeof transport.sendRequest, 'function')
     })
     
     it('should have close method', function(){
       var transport = new WebSocketTransport('ws://localhost:8080')
+      transports.push(transport)
       assert.strictEqual(typeof transport.close, 'function')
     })
     
     it('should have isReady method', function(){
       var transport = new WebSocketTransport('ws://localhost:8080')
+      transports.push(transport)
       assert.strictEqual(typeof transport.isReady, 'function')
       assert.strictEqual(transport.isReady(), false)
     })
     
     it('should have getStats method', function(){
       var transport = new WebSocketTransport('ws://localhost:8080')
+      transports.push(transport)
       var stats = transport.getStats()
       assert.strictEqual(typeof stats, 'object')
       assert.strictEqual(stats.connected, false)
@@ -57,6 +72,7 @@ describe('transports', function(){
     
     it('should increment request ID', function(){
       var transport = new WebSocketTransport('ws://localhost:8080')
+      transports.push(transport)
       assert.strictEqual(transport.requestId, 0)
       
       // Mock connection
@@ -69,13 +85,11 @@ describe('transports', function(){
       assert.strictEqual(id1, 1)
       assert.strictEqual(id2, 2)
       assert.strictEqual(transport.pendingRequests.size, 2)
-      
-      // Clean up to prevent hanging
-      transport.close()
     })
     
     it('should handle message parsing', function(done){
       var transport = new WebSocketTransport('ws://localhost:8080')
+      transports.push(transport)
       
       // Set up pending request
       transport.pendingRequests.set(1, {
@@ -102,6 +116,7 @@ describe('transports', function(){
     
     it('should handle error messages', function(done){
       var transport = new WebSocketTransport('ws://localhost:8080')
+      transports.push(transport)
       
       // Set up pending request
       transport.pendingRequests.set(1, {
@@ -123,6 +138,7 @@ describe('transports', function(){
     
     it('should emit server messages', function(done){
       var transport = new WebSocketTransport('ws://localhost:8080')
+      transports.push(transport)
       
       transport.on('server-message', function(message){
         assert.strictEqual(message.type, 'server-push')
@@ -139,6 +155,7 @@ describe('transports', function(){
     
     it('should handle invalid JSON', function(done){
       var transport = new WebSocketTransport('ws://localhost:8080')
+      transports.push(transport)
       
       transport.on('error', function(error){
         assert.ok(error instanceof Error)

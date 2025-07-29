@@ -53,6 +53,8 @@ server.listen(PORT, () => {
   console.log(`2. Choose a demo:`);
   console.log(`   - Basic demo: http://localhost:${PORT}/examples/browseress-demo/`);
   console.log(`   - Todo API: http://localhost:${PORT}/examples/todo-app/`);
+  console.log(`   - Browser editor: http://localhost:${PORT}/examples/browser-editor/`);
+  console.log(`   - Phase 1 tests: http://localhost:${PORT}/examples/phase1-test/`);
   console.log(`3. Click "Start Express App" or "Start Todo Server"`);
   console.log(`4. Visit http://localhost:8080 in a new tab`);
 });

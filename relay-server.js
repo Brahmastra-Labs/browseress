@@ -56,6 +56,30 @@ const httpServer = http.createServer((req, res) => {
   req.on('end', () => {
     const body = Buffer.concat(chunks).toString();
     
+    // Parse additional request context
+    const protocol = req.headers['x-forwarded-proto'] || 
+                    (req.connection.encrypted ? 'https' : 'http');
+    
+    const ip = req.headers['x-forwarded-for'] || 
+               req.connection.remoteAddress || 
+               req.socket.remoteAddress;
+    
+    const ips = req.headers['x-forwarded-for'] 
+      ? req.headers['x-forwarded-for'].split(',').map(ip => ip.trim())
+      : [];
+    
+    // Parse cookies from Cookie header
+    const cookieHeader = req.headers.cookie || '';
+    const cookies = {};
+    if (cookieHeader) {
+      cookieHeader.split(';').forEach(cookie => {
+        const parts = cookie.trim().split('=');
+        if (parts.length === 2) {
+          cookies[parts[0]] = decodeURIComponent(parts[1]);
+        }
+      });
+    }
+    
     // Serialize request for browser
     const message = {
       id,
@@ -65,12 +89,19 @@ const httpServer = http.createServer((req, res) => {
       headers: req.headers,
       httpVersion: req.httpVersion,
       remoteAddress: req.socket.remoteAddress,
+      protocol,
+      ip,
+      ips,
+      cookies,
       body
     };
     
     // Send to browser client
     try {
       console.log('[HTTP->WS] Sending request to browser:', message.method, message.url);
+      if (Object.keys(cookies).length > 0) {
+        console.log('[HTTP->WS] Cookies:', cookies);
+      }
       browserClient.send(JSON.stringify(message));
     } catch (err) {
       console.error('[HTTP] Failed to send to browser:', err.message);
@@ -160,10 +191,23 @@ function handleHttpResponse(message) {
   
   // Write response
   try {
-    // Add CORS headers to all responses
-    const headers = Object.assign({}, message.headers || {});
+    // Create headers object preserving arrays (for Set-Cookie etc)
+    const headers = {};
+    for (const [key, value] of Object.entries(message.headers || {})) {
+      // Node.js expects 'set-cookie' (lowercase) for multiple cookies
+      if (key.toLowerCase() === 'set-cookie' && Array.isArray(value)) {
+        headers['set-cookie'] = value;
+        console.log('[WS] Setting multiple Set-Cookie headers:', value);
+      } else {
+        headers[key] = value;
+      }
+    }
+    
+    // Add CORS headers
     headers['Access-Control-Allow-Origin'] = '*';
     headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH';
+    
+    console.log('[WS] Final headers object:', JSON.stringify(headers, null, 2));
     
     // Set status and headers
     res.writeHead(

@@ -1,0 +1,12 @@
+{
+  "require": ["test/support/env"],
+  "reporter": "spec",
+  "check-leaks": true,
+  "spec": ["test/**/*.js", "test/acceptance/**/*.js"],
+  "ignore": [
+    "test/integration.*.js", 
+    "test/e2e/**/*.js",
+    "test/browser/**/*.js",
+    "test/relay-server.js"
+  ]
+}

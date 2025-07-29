@@ -16,3 +16,5 @@ benchmarks/graphs
 # https://git-scm.com/docs/gitignore
 bin
 dist
+test-results
+playwright-report
