@@ -95,8 +95,13 @@
     "History.md",
     "Readme.md",
     "index.js",
-    "lib/"
+    "lib/",
+    "relay-server.js",
+    "bin/"
   ],
+  "bin": {
+    "browseress-relay": "./bin/browseress-relay"
+  },
   "scripts": {
     "build": "webpack",
     "build:watch": "webpack --watch",
