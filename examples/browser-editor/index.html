@@ -1,0 +1,1262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Browser Express Editor - Code Express APIs in Your Browser</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/monokai.min.css">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0d1117;
+      color: #c9d1d9;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    .container {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    .header {
+      background: #161b22;
+      padding: 12px 20px;
+      border-bottom: 1px solid #30363d;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .header h1 {
+      font-size: 20px;
+      font-weight: 600;
+      color: #f0f6fc;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .logo {
+      font-size: 24px;
+    }
+
+    .controls {
+      display: flex;
+      gap: 10px;
+    }
+
+    button {
+      background: #238636;
+      color: white;
+      border: none;
+      padding: 6px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: background 0.2s;
+    }
+
+    button:hover {
+      background: #2ea043;
+    }
+
+    button:disabled {
+      background: #21262d;
+      color: #8b949e;
+      cursor: not-allowed;
+    }
+
+    .btn-stop {
+      background: #da3633;
+    }
+
+    .btn-stop:hover {
+      background: #f85149;
+    }
+
+    .btn-secondary {
+      background: #21262d;
+      border: 1px solid #30363d;
+    }
+
+    .btn-secondary:hover {
+      background: #30363d;
+      border-color: #8b949e;
+    }
+
+    .main-content {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .editor-section {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid #30363d;
+    }
+
+    .output-section {
+      width: 40%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .section-header {
+      background: #161b22;
+      padding: 10px 15px;
+      border-bottom: 1px solid #30363d;
+      font-size: 14px;
+      font-weight: 600;
+      color: #f0f6fc;
+    }
+
+    .CodeMirror {
+      flex: 1;
+      font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .console-output {
+      flex: 1;
+      background: #0d1117;
+      padding: 15px;
+      overflow-y: auto;
+      font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .console-entry {
+      margin-bottom: 8px;
+      display: flex;
+      gap: 10px;
+    }
+
+    .console-timestamp {
+      color: #8b949e;
+      flex-shrink: 0;
+      user-select: none;
+    }
+
+    .console-message {
+      flex: 1;
+      word-break: break-word;
+    }
+
+    .console-log { color: #c9d1d9; }
+    .console-error { color: #f85149; }
+    .console-warn { color: #d29922; }
+    .console-info { color: #58a6ff; }
+    .console-success { color: #3fb950; }
+
+    .status-bar {
+      background: #161b22;
+      color: #8b949e;
+      padding: 8px 15px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      border-top: 1px solid #30363d;
+    }
+
+    .status-connected {
+      color: #3fb950;
+    }
+
+    .status-disconnected {
+      color: #f85149;
+    }
+
+    .api-tester {
+      background: #161b22;
+      border-top: 1px solid #30363d;
+      padding: 15px;
+    }
+
+    .api-tester h3 {
+      font-size: 14px;
+      margin-bottom: 12px;
+      color: #f0f6fc;
+      font-weight: 600;
+    }
+
+    .api-test-form {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .api-test-form select,
+    .api-test-form input {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      color: #c9d1d9;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+    }
+
+    .api-test-form select {
+      min-width: 100px;
+    }
+
+    .api-test-form input {
+      flex: 1;
+      font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+    }
+
+    .api-test-form input:focus,
+    .api-test-form select:focus {
+      outline: none;
+      border-color: #58a6ff;
+    }
+
+    .api-test-form button {
+      padding: 6px 12px;
+      font-size: 13px;
+    }
+
+    .response-viewer {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 12px;
+      max-height: 300px;
+      overflow-y: auto;
+      font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+      font-size: 12px;
+    }
+
+    .response-status {
+      font-weight: 600;
+      margin-bottom: 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #30363d;
+    }
+
+    .response-status.success { color: #3fb950; }
+    .response-status.error { color: #f85149; }
+
+    .response-headers {
+      color: #8b949e;
+      margin-bottom: 12px;
+      font-size: 11px;
+    }
+
+    .response-body {
+      color: #c9d1d9;
+    }
+
+    .response-body pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .loading {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid #58a6ff;
+      border-radius: 50%;
+      border-top-color: transparent;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .welcome-message {
+      padding: 20px;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      margin: 20px;
+    }
+
+    .welcome-message h2 {
+      color: #58a6ff;
+      margin-bottom: 10px;
+    }
+
+    .welcome-message p {
+      color: #8b949e;
+      line-height: 1.6;
+    }
+
+    .quick-links {
+      display: flex;
+      gap: 10px;
+      margin-top: 15px;
+    }
+
+    .quick-links button {
+      background: #21262d;
+      font-size: 12px;
+      padding: 4px 12px;
+    }
+
+    /* Scrollbar styling */
+    ::-webkit-scrollbar {
+      width: 10px;
+      height: 10px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #0d1117;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #30363d;
+      border-radius: 5px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #484f58;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1><span class="logo">🚀</span> Browser Express Editor</h1>
+      <div class="controls">
+        <button id="run-btn">
+          <span>▶</span> Run Server
+        </button>
+        <button id="stop-btn" class="btn-stop" style="display: none;">
+          <span>■</span> Stop Server
+        </button>
+        <button id="clear-btn" class="btn-secondary">
+          Clear Console
+        </button>
+      </div>
+    </div>
+
+    <div class="main-content">
+      <div class="editor-section">
+        <div class="section-header">Code Editor</div>
+        <textarea id="code-editor">// Todo API - A full-featured todo list API running in your browser!
+const app = express();
+
+// Middleware
+app.use((req, res, next) => {
+  // Parse query string
+  const urlParts = req.url.split('?');
+  req.path = urlParts[0];
+  req.query = {};
+  
+  if (urlParts[1]) {
+    const queryString = urlParts[1];
+    const pairs = queryString.split('&');
+    pairs.forEach(pair => {
+      const [key, value] = pair.split('=');
+      if (key) {
+        req.query[decodeURIComponent(key)] = value ? decodeURIComponent(value) : '';
+      }
+    });
+  }
+  
+  // Parse JSON body
+  if (req.headers['content-type'] === 'application/json') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        req.body = JSON.parse(body);
+      } catch (e) {
+        req.body = {};
+      }
+      next();
+    });
+  } else {
+    next();
+  }
+});
+
+// Logging middleware
+app.use((req, res, next) => {
+  const start = Date.now();
+  const originalEnd = res.end;
+  res.end = function() {
+    const duration = Date.now() - start;
+    console.log(`${req.method} ${req.url} - ${res.statusCode} (${duration}ms)`);
+    originalEnd.apply(res, arguments);
+  };
+  next();
+});
+
+// CORS middleware
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  next();
+});
+
+// Todo storage
+let todos = [];
+let nextId = 1;
+
+// Initialize with sample todos
+function initializeTodos() {
+  todos = [
+    { id: nextId++, title: 'Learn Browseress', completed: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+    { id: nextId++, title: 'Build an Express API in the browser', completed: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+    { id: nextId++, title: 'Test pagination and filtering', completed: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+    { id: nextId++, title: 'Deploy to production', completed: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+  ];
+  console.log(`Initialized with ${todos.length} sample todos`);
+}
+
+// Routes
+app.get('/', (req, res) => {
+  res.json({
+    name: 'Browseress Todo API',
+    version: '1.0.0',
+    message: 'A full-featured todo API running entirely in your browser! 🚀',
+    endpoints: [
+      'GET /todos - List todos with filtering, pagination, and sorting',
+      'POST /todos - Create a new todo',
+      'GET /todos/:id - Get a specific todo',
+      'PUT /todos/:id - Update a todo (full update)',
+      'PATCH /todos/:id - Update a todo (partial update)',
+      'DELETE /todos/:id - Delete a specific todo',
+      'DELETE /todos - Delete all todos'
+    ],
+    queryParameters: {
+      'completed': 'Filter by completion status (true/false)',
+      'q': 'Search todos by title',
+      'sort': 'Sort by field (title, createdAt, updatedAt)',
+      'order': 'Sort order (asc/desc)',
+      'page': 'Page number (default: 1)',
+      'limit': 'Items per page (default: 10)'
+    }
+  });
+});
+
+// GET all todos with advanced features
+app.get('/todos', (req, res) => {
+  let result = [...todos];
+  
+  // Filter by completed status
+  if (req.query.completed !== undefined) {
+    const completed = req.query.completed === 'true';
+    result = result.filter(todo => todo.completed === completed);
+    console.log(`Filtered by completed=${completed}: ${result.length} todos`);
+  }
+  
+  // Search by title
+  if (req.query.q) {
+    const query = req.query.q.toLowerCase();
+    result = result.filter(todo => 
+      todo.title.toLowerCase().includes(query)
+    );
+    console.log(`Searched for "${req.query.q}": ${result.length} todos found`);
+  }
+  
+  // Sorting
+  const sortField = req.query.sort || 'createdAt';
+  const sortOrder = req.query.order || 'desc';
+  
+  result.sort((a, b) => {
+    let aVal = a[sortField];
+    let bVal = b[sortField];
+    
+    // Handle string comparison
+    if (typeof aVal === 'string') {
+      aVal = aVal.toLowerCase();
+      bVal = bVal.toLowerCase();
+    }
+    
+    if (sortOrder === 'asc') {
+      return aVal > bVal ? 1 : -1;
+    } else {
+      return aVal < bVal ? 1 : -1;
+    }
+  });
+  
+  // Pagination
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 10;
+  const startIndex = (page - 1) * limit;
+  const endIndex = page * limit;
+  
+  const totalItems = result.length;
+  const totalPages = Math.ceil(totalItems / limit);
+  const paginatedResults = result.slice(startIndex, endIndex);
+  
+  // Set pagination headers
+  res.set({
+    'X-Total-Count': totalItems.toString(),
+    'X-Page': page.toString(),
+    'X-Page-Size': limit.toString(),
+    'X-Total-Pages': totalPages.toString()
+  });
+  
+  // Add pagination links
+  const links = [];
+  if (page > 1) {
+    links.push(`</todos?page=1&limit=${limit}>; rel="first"`);
+    links.push(`</todos?page=${page - 1}&limit=${limit}>; rel="prev"`);
+  }
+  if (page < totalPages) {
+    links.push(`</todos?page=${page + 1}&limit=${limit}>; rel="next"`);
+    links.push(`</todos?page=${totalPages}&limit=${limit}>; rel="last"`);
+  }
+  if (links.length > 0) {
+    res.set('Link', links.join(', '));
+  }
+  
+  res.json({
+    success: true,
+    data: paginatedResults,
+    pagination: {
+      page,
+      pageSize: limit,
+      totalItems,
+      totalPages,
+      hasNext: page < totalPages,
+      hasPrev: page > 1
+    }
+  });
+});
+
+// POST new todo with validation
+app.post('/todos', (req, res) => {
+  // Validation
+  if (!req.body.title || req.body.title.trim().length === 0) {
+    return res.status(400).json({ 
+      success: false,
+      error: 'Validation failed',
+      details: { title: 'Title is required and cannot be empty' }
+    });
+  }
+  
+  const todo = {
+    id: nextId++,
+    title: req.body.title.trim(),
+    completed: req.body.completed === true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  
+  todos.push(todo);
+  console.log(`Created todo: "${todo.title}"`);
+  
+  res.status(201)
+    .location(`/todos/${todo.id}`)
+    .json({
+      success: true,
+      data: todo
+    });
+});
+
+// GET single todo
+app.get('/todos/:id', (req, res) => {
+  const id = parseInt(req.params.id);
+  
+  if (isNaN(id)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid ID format'
+    });
+  }
+  
+  const todo = todos.find(t => t.id === id);
+  
+  if (todo) {
+    res.json({
+      success: true,
+      data: todo
+    });
+  } else {
+    res.status(404).json({
+      success: false,
+      error: 'Todo not found'
+    });
+  }
+});
+
+// PUT full update todo
+app.put('/todos/:id', (req, res) => {
+  const id = parseInt(req.params.id);
+  
+  if (isNaN(id)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid ID format'
+    });
+  }
+  
+  // Validation
+  if (!req.body.title || req.body.title.trim().length === 0) {
+    return res.status(400).json({ 
+      success: false,
+      error: 'Validation failed',
+      details: { title: 'Title is required and cannot be empty' }
+    });
+  }
+  
+  const index = todos.findIndex(t => t.id === id);
+  
+  if (index !== -1) {
+    todos[index] = {
+      id: id,
+      title: req.body.title.trim(),
+      completed: req.body.completed === true,
+      createdAt: todos[index].createdAt,
+      updatedAt: new Date().toISOString()
+    };
+    console.log(`Updated todo ${id}: "${todos[index].title}"`);
+    res.json({
+      success: true,
+      data: todos[index]
+    });
+  } else {
+    res.status(404).json({
+      success: false,
+      error: 'Todo not found'
+    });
+  }
+});
+
+// PATCH partial update todo
+app.patch('/todos/:id', (req, res) => {
+  const id = parseInt(req.params.id);
+  
+  if (isNaN(id)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid ID format'
+    });
+  }
+  
+  const index = todos.findIndex(t => t.id === id);
+  
+  if (index !== -1) {
+    // Only update provided fields
+    if (req.body.title !== undefined) {
+      if (req.body.title.trim().length === 0) {
+        return res.status(400).json({ 
+          success: false,
+          error: 'Validation failed',
+          details: { title: 'Title cannot be empty' }
+        });
+      }
+      todos[index].title = req.body.title.trim();
+    }
+    
+    if (req.body.completed !== undefined) {
+      todos[index].completed = req.body.completed === true;
+    }
+    
+    todos[index].updatedAt = new Date().toISOString();
+    console.log(`Patched todo ${id}`);
+    res.json({
+      success: true,
+      data: todos[index]
+    });
+  } else {
+    res.status(404).json({
+      success: false,
+      error: 'Todo not found'
+    });
+  }
+});
+
+// DELETE todo
+app.delete('/todos/:id', (req, res) => {
+  const id = parseInt(req.params.id);
+  
+  if (isNaN(id)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid ID format'
+    });
+  }
+  
+  const index = todos.findIndex(t => t.id === id);
+  
+  if (index !== -1) {
+    const deleted = todos.splice(index, 1)[0];
+    console.log(`Deleted todo ${id}: "${deleted.title}"`);
+    res.status(204).send(); // No content
+  } else {
+    res.status(404).json({
+      success: false,
+      error: 'Todo not found'
+    });
+  }
+});
+
+// DELETE all todos (useful for testing)
+app.delete('/todos', (req, res) => {
+  const count = todos.length;
+  todos = [];
+  nextId = 1;
+  console.log(`Deleted all ${count} todos`);
+  res.json({
+    success: true,
+    message: `Deleted ${count} todos`,
+    deleted: count
+  });
+});
+
+// OPTIONS for CORS preflight
+app.options('/todos', (req, res) => {
+  res.set({
+    'Allow': 'GET, POST, DELETE, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type'
+  });
+  res.status(204).send();
+});
+
+app.options('/todos/:id', (req, res) => {
+  res.set({
+    'Allow': 'GET, PUT, PATCH, DELETE, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, PUT, PATCH, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type'
+  });
+  res.status(204).send();
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    error: 'Route not found',
+    message: `Cannot ${req.method} ${req.url}`,
+    hint: 'Check the available endpoints at GET /'
+  });
+});
+
+// Error handler
+app.use((err, req, res, next) => {
+  console.error('Error:', err.message);
+  res.status(500).json({
+    success: false,
+    error: 'Internal server error',
+    message: err.message
+  });
+});
+
+// Initialize todos and start server
+initializeTodos();
+app.listen(transport);
+
+console.log('✅ Todo API server is running!');
+console.log('📡 Ready to handle requests via the relay server');
+console.log('🔧 Try these example requests:');
+console.log('   GET /todos?completed=false&limit=5');
+console.log('   GET /todos?q=learn&sort=title&order=asc');
+console.log('   POST /todos with {"title": "New todo", "completed": false}');</textarea>
+      </div>
+
+      <div class="output-section">
+        <div class="section-header">Console Output</div>
+        <div id="console-output" class="console-output">
+          <div class="welcome-message">
+            <h2>Welcome to Browser Express Editor! 👋</h2>
+            <p>Write Express.js code in the editor and run it directly in your browser. Your server will communicate via WebSocket with the local relay server.</p>
+            <div class="quick-links">
+              <button onclick="loadExample('basic')">Load Basic Example</button>
+              <button onclick="loadExample('crud')">Load CRUD Example</button>
+              <button onclick="loadExample('middleware')">Load Middleware Example</button>
+            </div>
+          </div>
+        </div>
+        
+        <div class="api-tester">
+          <h3>API Tester</h3>
+          <div class="api-test-form">
+            <select id="method-select">
+              <option>GET</option>
+              <option>POST</option>
+              <option>PUT</option>
+              <option>DELETE</option>
+            </select>
+            <input type="text" id="url-input" placeholder="/api/endpoint" value="/todos" autocomplete="off">
+            <button id="send-btn">Send</button>
+          </div>
+          <div id="response-viewer" class="response-viewer" style="display: none;"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="status-bar" class="status-bar">
+      <span id="status-text">Ready to start</span>
+      <span id="transport-status" class="status-disconnected">Connecting to relay server...</span>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/javascript/javascript.min.js"></script>
+  <script src="../../dist/browseress.bundle.js"></script>
+  <script>
+    // Initialize CodeMirror
+    const editor = CodeMirror.fromTextArea(document.getElementById('code-editor'), {
+      lineNumbers: true,
+      mode: 'javascript',
+      theme: 'monokai',
+      tabSize: 2,
+      indentWithTabs: false,
+      lineWrapping: true,
+      autoCloseBrackets: true,
+      matchBrackets: true,
+      extraKeys: {
+        'Ctrl-Enter': () => runCode(),
+        'Cmd-Enter': () => runCode()
+      }
+    });
+
+    // Browser Express Editor Implementation
+    class BrowserExpressEditor {
+      constructor() {
+        this.transport = null;
+        this.app = null;
+        this.running = false;
+        this.consoleOutput = document.getElementById('console-output');
+        this.responseViewer = document.getElementById('response-viewer');
+        this.statusBar = document.getElementById('status-bar');
+        this.statusText = document.getElementById('status-text');
+        this.transportStatus = document.getElementById('transport-status');
+        
+        this.setupConsoleCapture();
+        this.attachEventListeners();
+        this.initTransport();
+      }
+
+      setupConsoleCapture() {
+        const originalLog = console.log;
+        const originalError = console.error;
+        const originalWarn = console.warn;
+        const originalInfo = console.info;
+
+        console.log = (...args) => {
+          this.addConsoleOutput('log', args);
+          originalLog.apply(console, args);
+        };
+
+        console.error = (...args) => {
+          this.addConsoleOutput('error', args);
+          originalError.apply(console, args);
+        };
+
+        console.warn = (...args) => {
+          this.addConsoleOutput('warn', args);
+          originalWarn.apply(console, args);
+        };
+
+        console.info = (...args) => {
+          this.addConsoleOutput('info', args);
+          originalInfo.apply(console, args);
+        };
+      }
+
+      addConsoleOutput(type, args, skipWelcome = false) {
+        if (!skipWelcome) {
+          // Remove welcome message if it exists
+          const welcome = this.consoleOutput.querySelector('.welcome-message');
+          if (welcome) welcome.remove();
+        }
+
+        const entry = document.createElement('div');
+        entry.className = `console-entry console-${type}`;
+        
+        const timestamp = new Date().toLocaleTimeString('en-US', { 
+          hour12: false,
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        });
+        
+        const message = args.map(arg => {
+          if (typeof arg === 'object') {
+            try {
+              return JSON.stringify(arg, null, 2);
+            } catch (e) {
+              return arg.toString();
+            }
+          }
+          return arg;
+        }).join(' ');
+        
+        entry.innerHTML = `
+          <span class="console-timestamp">[${timestamp}]</span>
+          <span class="console-message">${this.escapeHtml(message)}</span>
+        `;
+        
+        this.consoleOutput.appendChild(entry);
+        this.consoleOutput.scrollTop = this.consoleOutput.scrollHeight;
+      }
+
+      escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+      }
+
+      attachEventListeners() {
+        document.getElementById('run-btn').addEventListener('click', () => this.runCode());
+        document.getElementById('stop-btn').addEventListener('click', () => this.stopCode());
+        document.getElementById('clear-btn').addEventListener('click', () => this.clearConsole());
+        document.getElementById('send-btn').addEventListener('click', () => this.sendApiRequest());
+        
+        // Allow Enter key in URL input to send request
+        document.getElementById('url-input').addEventListener('keypress', (e) => {
+          if (e.key === 'Enter') this.sendApiRequest();
+        });
+      }
+
+      async initTransport() {
+        try {
+          // Create WebSocket transport
+          this.transport = new browseress.WebSocketTransport('ws://localhost:3001');
+          
+          this.transport.on('connect', () => {
+            this.transportStatus.textContent = 'Connected to relay server';
+            this.transportStatus.className = 'status-connected';
+            this.addConsoleOutput('success', ['✅ Connected to relay server']);
+          });
+
+          this.transport.on('disconnect', () => {
+            this.transportStatus.textContent = 'Disconnected from relay server';
+            this.transportStatus.className = 'status-disconnected';
+            this.addConsoleOutput('warn', ['⚠️ Disconnected from relay server']);
+          });
+
+          this.transport.on('error', (error) => {
+            console.error('Transport error:', error.message);
+          });
+
+          await this.transport.connect();
+        } catch (error) {
+          console.error('Failed to initialize transport:', error.message);
+          this.transportStatus.textContent = 'Failed to connect';
+          this.transportStatus.className = 'status-disconnected';
+          this.addConsoleOutput('error', ['❌ Failed to connect to relay server. Make sure it\'s running: node relay-server.js']);
+        }
+      }
+
+      async runCode() {
+        if (this.running) {
+          this.addConsoleOutput('warn', ['⚠️ Server is already running']);
+          return;
+        }
+
+        try {
+          // Update UI
+          document.getElementById('run-btn').style.display = 'none';
+          document.getElementById('stop-btn').style.display = 'inline-flex';
+          this.statusText.textContent = 'Server running';
+          this.running = true;
+
+          // Clear previous listeners
+          if (this.transport) {
+            this.transport.removeAllListeners('request');
+          }
+
+          // Get the code
+          const code = editor.getValue();
+          
+          // Create a function with Express context
+          const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+          const execute = new AsyncFunction(
+            'express', 
+            'transport', 
+            'Buffer',
+            'process',
+            code
+          );
+          
+          // Create a minimal process object
+          const processStub = {
+            env: {},
+            uptime: () => Math.floor((Date.now() - this.startTime) / 1000),
+            memoryUsage: () => ({ 
+              rss: performance.memory?.usedJSHeapSize || 0,
+              heapTotal: performance.memory?.totalJSHeapSize || 0,
+              heapUsed: performance.memory?.usedJSHeapSize || 0,
+              external: 0
+            })
+          };
+          
+          this.startTime = Date.now();
+          
+          // Execute the code
+          await execute(
+            browseress.express, 
+            this.transport, 
+            window.Buffer || Uint8Array,
+            processStub
+          );
+          
+        } catch (error) {
+          this.addConsoleOutput('error', ['❌ Execution error:', error.message]);
+          this.stopCode();
+        }
+      }
+
+      stopCode() {
+        // Clear all transport listeners
+        if (this.transport) {
+          this.transport.removeAllListeners('request');
+        }
+        
+        this.running = false;
+        
+        // Update UI
+        document.getElementById('run-btn').style.display = 'inline-flex';
+        document.getElementById('stop-btn').style.display = 'none';
+        this.statusText.textContent = 'Server stopped';
+        
+        this.addConsoleOutput('log', ['🛑 Server stopped']);
+      }
+
+      clearConsole() {
+        this.consoleOutput.innerHTML = '';
+        this.responseViewer.style.display = 'none';
+      }
+
+      async sendApiRequest() {
+        const method = document.getElementById('method-select').value;
+        const url = document.getElementById('url-input').value;
+        
+        if (!this.running) {
+          this.responseViewer.style.display = 'block';
+          this.responseViewer.innerHTML = '<div class="response-status error">Error: Server is not running</div>';
+          return;
+        }
+
+        this.responseViewer.style.display = 'block';
+        this.responseViewer.innerHTML = '<div class="loading"></div> Sending request...';
+        
+        try {
+          // Prepare request body for POST/PUT
+          let body = '';
+          const headers = {
+            'Accept': 'application/json'
+          };
+          
+          if (method === 'POST' || method === 'PUT') {
+            // Smart body generation based on URL
+            if (url.includes('/todos')) {
+              body = JSON.stringify({
+                title: 'New todo item ' + new Date().toLocaleTimeString(),
+                completed: false
+              });
+            } else {
+              body = JSON.stringify({
+                name: 'Test User',
+                email: 'test@example.com'
+              });
+            }
+            headers['Content-Type'] = 'application/json';
+          }
+
+          // Make request to the relay server
+          const response = await fetch(`http://localhost:8080${url}`, {
+            method,
+            headers,
+            body: body || undefined
+          });
+
+          const responseText = await response.text();
+          let responseBody = responseText;
+          
+          // Try to pretty-print JSON
+          try {
+            const json = JSON.parse(responseText);
+            responseBody = JSON.stringify(json, null, 2);
+          } catch (e) {
+            // Not JSON, display as is
+          }
+
+          // Get response headers
+          const responseHeaders = {};
+          response.headers.forEach((value, key) => {
+            responseHeaders[key] = value;
+          });
+
+          const statusClass = response.ok ? 'success' : 'error';
+          
+          this.responseViewer.innerHTML = `
+            <div class="response-status ${statusClass}">
+              ${response.status} ${response.statusText}
+            </div>
+            <div class="response-headers">
+              <strong>Headers:</strong><br>
+              ${Object.entries(responseHeaders).map(([k, v]) => `${k}: ${v}`).join('<br>')}
+            </div>
+            <div class="response-body">
+              <strong>Response:</strong>
+              <pre>${this.escapeHtml(responseBody)}</pre>
+            </div>
+          `;
+        } catch (error) {
+          this.responseViewer.innerHTML = `
+            <div class="response-status error">
+              Network Error
+            </div>
+            <div class="response-body">
+              ${error.message}
+            </div>
+          `;
+        }
+      }
+    }
+
+    // Initialize the editor
+    let editorInstance;
+    window.addEventListener('DOMContentLoaded', () => {
+      editorInstance = new BrowserExpressEditor();
+    });
+
+    // Example loader
+    function loadExample(type) {
+      const examples = {
+        basic: `// Basic Express Server
+const app = express();
+
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'Hello from Express!',
+    timestamp: new Date()
+  });
+});
+
+app.listen(transport);
+console.log('Basic server running!');`,
+
+        crud: `// CRUD API Example
+const app = express();
+app.use(express.json());
+
+let items = [
+  { id: 1, name: 'Item 1' },
+  { id: 2, name: 'Item 2' }
+];
+
+// List all items
+app.get('/items', (req, res) => {
+  res.json(items);
+});
+
+// Get single item
+app.get('/items/:id', (req, res) => {
+  const item = items.find(i => i.id === parseInt(req.params.id));
+  if (!item) return res.status(404).json({ error: 'Not found' });
+  res.json(item);
+});
+
+// Create item
+app.post('/items', (req, res) => {
+  const item = {
+    id: items.length + 1,
+    name: req.body.name
+  };
+  items.push(item);
+  res.status(201).json(item);
+});
+
+// Update item
+app.put('/items/:id', (req, res) => {
+  const index = items.findIndex(i => i.id === parseInt(req.params.id));
+  if (index === -1) return res.status(404).json({ error: 'Not found' });
+  
+  items[index] = { ...items[index], name: req.body.name };
+  res.json(items[index]);
+});
+
+// Delete item
+app.delete('/items/:id', (req, res) => {
+  const index = items.findIndex(i => i.id === parseInt(req.params.id));
+  if (index === -1) return res.status(404).json({ error: 'Not found' });
+  
+  items.splice(index, 1);
+  res.status(204).send();
+});
+
+app.listen(transport);
+console.log('CRUD API ready!');`,
+
+        middleware: `// Middleware Example
+const app = express();
+app.use(express.json());
+
+// Logger middleware
+app.use((req, res, next) => {
+  console.log(\`[\${new Date().toISOString()}] \${req.method} \${req.url}\`);
+  next();
+});
+
+// Auth middleware
+const requireAuth = (req, res, next) => {
+  const token = req.headers.authorization;
+  if (!token) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  // Simple token check
+  if (token === 'Bearer secret-token') {
+    req.user = { id: 1, name: 'Admin' };
+    next();
+  } else {
+    res.status(403).json({ error: 'Invalid token' });
+  }
+};
+
+// Public route
+app.get('/', (req, res) => {
+  res.json({ message: 'Public endpoint' });
+});
+
+// Protected route
+app.get('/protected', requireAuth, (req, res) => {
+  res.json({ 
+    message: 'Protected data',
+    user: req.user
+  });
+});
+
+// Error handler
+app.use((err, req, res, next) => {
+  console.error('Error:', err);
+  res.status(500).json({ error: err.message });
+});
+
+app.listen(transport);
+console.log('Middleware example running!');
+console.log('Try GET /protected with Authorization: Bearer secret-token');`
+      };
+
+      if (examples[type]) {
+        editor.setValue(examples[type]);
+        editorInstance.addConsoleOutput('info', [`📝 Loaded ${type} example`]);
+      }
+    }
+
+    // Keyboard shortcut hint
+    window.runCode = () => editorInstance.runCode();
+    console.info('💡 Tip: Press Ctrl+Enter (or Cmd+Enter on Mac) to run your code!');
+  </script>
+</body>
+</html>

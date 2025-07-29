@@ -24,6 +24,9 @@ let browserClient = null;
 
 // Create HTTP server to receive public requests
 const httpServer = http.createServer((req, res) => {
+  // Don't handle OPTIONS here - let the browser app handle it
+  // This allows the app to set proper Allow headers
+
   // Generate unique ID for this request
   const id = ++requestId;
   
@@ -32,7 +35,10 @@ const httpServer = http.createServer((req, res) => {
   // Check if browser client is connected
   if (!browserClient || browserClient.readyState !== WebSocket.OPEN) {
     console.error('[HTTP] No browser client connected');
-    res.writeHead(503, { 'Content-Type': 'text/plain' });
+    res.writeHead(503, { 
+      'Content-Type': 'text/plain',
+      'Access-Control-Allow-Origin': '*'
+    });
     res.end('Service Unavailable: Browser Express app not connected\n');
     return;
   }
@@ -68,7 +74,10 @@ const httpServer = http.createServer((req, res) => {
       browserClient.send(JSON.stringify(message));
     } catch (err) {
       console.error('[HTTP] Failed to send to browser:', err.message);
-      res.writeHead(500, { 'Content-Type': 'text/plain' });
+      res.writeHead(500, { 
+        'Content-Type': 'text/plain',
+        'Access-Control-Allow-Origin': '*'
+      });
       res.end('Internal Server Error\n');
       pendingRequests.delete(id);
     }
@@ -151,11 +160,16 @@ function handleHttpResponse(message) {
   
   // Write response
   try {
+    // Add CORS headers to all responses
+    const headers = Object.assign({}, message.headers || {});
+    headers['Access-Control-Allow-Origin'] = '*';
+    headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH';
+    
     // Set status and headers
     res.writeHead(
       message.statusCode || 200,
       message.statusMessage || 'OK',
-      message.headers || {}
+      headers
     );
     
     // Write body and end response
@@ -177,7 +191,10 @@ setInterval(() => {
   for (const [id, pending] of pendingRequests) {
     if (now - pending.timestamp > timeout) {
       console.log(`[CLEANUP] Removing timed out request ID: ${id}`);
-      pending.res.writeHead(504, { 'Content-Type': 'text/plain' });
+      pending.res.writeHead(504, { 
+        'Content-Type': 'text/plain',
+        'Access-Control-Allow-Origin': '*'
+      });
       pending.res.end('Gateway Timeout\n');
       pendingRequests.delete(id);
     }

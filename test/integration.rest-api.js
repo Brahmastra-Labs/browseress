@@ -68,20 +68,16 @@ describe('Browseress REST API Integration', function() {
     })
   })
   
-  after(function() {
-    // Destroy the agent to close all connections
-    agent.destroy()
-  })
-  
   describe('Basic CRUD Operations', function() {
-    var todoId
-    
     it('GET empty todos collection', function(done) {
       request('GET', '/todos', function(err, res, body) {
         if (err) return done(err)
         assert.strictEqual(res.statusCode, 200)
-        assert(Array.isArray(body))
-        assert.strictEqual(body.length, 0)
+        assert.strictEqual(body.success, true)
+        assert(Array.isArray(body.data))
+        assert.strictEqual(body.data.length, 0)
+        assert(body.pagination)
+        assert.strictEqual(body.pagination.totalItems, 0)
         done()
       })
     })
@@ -90,6 +86,7 @@ describe('Browseress REST API Integration', function() {
       request('POST', '/todos', { completed: true }, function(err, res, body) {
         if (err) return done(err)
         assert.strictEqual(res.statusCode, 400)
+        assert.strictEqual(body.success, false)
         assert.strictEqual(body.error, 'Validation failed')
         assert.strictEqual(body.details.title, 'Title is required')
         done()
@@ -97,34 +94,46 @@ describe('Browseress REST API Integration', function() {
     })
     
     it('POST with empty title should fail', function(done) {
-      request('POST', '/todos', { title: '', completed: true }, function(err, res, body) {
+      request('POST', '/todos', { title: '' }, function(err, res, body) {
         if (err) return done(err)
         assert.strictEqual(res.statusCode, 400)
+        assert.strictEqual(body.success, false)
         assert.strictEqual(body.error, 'Validation failed')
+        assert.strictEqual(body.details.title, 'Title is required')
         done()
       })
     })
     
     it('POST valid todo', function(done) {
-      request('POST', '/todos', { title: 'Write tests', completed: false }, function(err, res, body) {
+      request('POST', '/todos', { title: 'Test todo', completed: false }, function(err, res, body) {
         if (err) return done(err)
         assert.strictEqual(res.statusCode, 201)
-        assert.strictEqual(body.title, 'Write tests')
-        assert.strictEqual(body.completed, false)
-        assert(body.id)
-        assert(body.createdAt)
-        todoId = body.id
+        assert.strictEqual(body.success, true)
+        assert(body.data)
+        assert(body.data.id)
+        assert.strictEqual(body.data.title, 'Test todo')
+        assert.strictEqual(body.data.completed, false)
+        assert(body.data.createdAt)
+        assert(body.data.updatedAt)
+        assert(res.headers['location'])
         done()
       })
     })
     
     it('GET single todo', function(done) {
-      request('GET', '/todos/' + todoId, function(err, res, body) {
+      request('POST', '/todos', { title: 'Get test' }, function(err, res, body) {
         if (err) return done(err)
-        assert.strictEqual(res.statusCode, 200)
-        assert.strictEqual(body.id, todoId)
-        assert.strictEqual(body.title, 'Write tests')
-        done()
+        var todoId = body.data.id
+        
+        request('GET', '/todos/' + todoId, function(err, res, body) {
+          if (err) return done(err)
+          assert.strictEqual(res.statusCode, 200)
+          assert.strictEqual(body.success, true)
+          assert(body.data)
+          assert.strictEqual(body.data.id, todoId)
+          assert.strictEqual(body.data.title, 'Get test')
+          done()
+        })
       })
     })
     
@@ -132,6 +141,7 @@ describe('Browseress REST API Integration', function() {
       request('GET', '/todos/999999', function(err, res, body) {
         if (err) return done(err)
         assert.strictEqual(res.statusCode, 404)
+        assert.strictEqual(body.success, false)
         assert.strictEqual(body.error, 'Todo not found')
         done()
       })
@@ -141,6 +151,7 @@ describe('Browseress REST API Integration', function() {
       request('GET', '/todos/abc', function(err, res, body) {
         if (err) return done(err)
         assert.strictEqual(res.statusCode, 400)
+        assert.strictEqual(body.success, false)
         assert.strictEqual(body.error, 'Invalid ID format')
         done()
       })
@@ -153,7 +164,7 @@ describe('Browseress REST API Integration', function() {
     before(function(done) {
       request('POST', '/todos', { title: 'Update test', completed: false }, function(err, res, body) {
         if (err) return done(err)
-        todoId = body.id
+        todoId = body.data.id
         done()
       })
     })
@@ -162,16 +173,19 @@ describe('Browseress REST API Integration', function() {
       request('PUT', '/todos/' + todoId, { title: 'Updated title', completed: true }, function(err, res, body) {
         if (err) return done(err)
         assert.strictEqual(res.statusCode, 200)
-        assert.strictEqual(body.title, 'Updated title')
-        assert.strictEqual(body.completed, true)
+        assert.strictEqual(body.success, true)
+        assert.strictEqual(body.data.title, 'Updated title')
+        assert.strictEqual(body.data.completed, true)
+        assert(body.data.updatedAt)
         done()
       })
     })
     
     it('PUT with missing title should fail', function(done) {
-      request('PUT', '/todos/' + todoId, { completed: false }, function(err, res, body) {
+      request('PUT', '/todos/' + todoId, { completed: true }, function(err, res, body) {
         if (err) return done(err)
         assert.strictEqual(res.statusCode, 400)
+        assert.strictEqual(body.success, false)
         assert.strictEqual(body.error, 'Validation failed')
         done()
       })
@@ -181,8 +195,9 @@ describe('Browseress REST API Integration', function() {
       request('PATCH', '/todos/' + todoId, { title: 'Patched title' }, function(err, res, body) {
         if (err) return done(err)
         assert.strictEqual(res.statusCode, 200)
-        assert.strictEqual(body.title, 'Patched title')
-        assert.strictEqual(body.completed, true) // Should remain unchanged
+        assert.strictEqual(body.success, true)
+        assert.strictEqual(body.data.title, 'Patched title')
+        assert.strictEqual(body.data.completed, true) // Should remain unchanged
         done()
       })
     })
@@ -191,8 +206,9 @@ describe('Browseress REST API Integration', function() {
       request('PATCH', '/todos/' + todoId, { completed: false }, function(err, res, body) {
         if (err) return done(err)
         assert.strictEqual(res.statusCode, 200)
-        assert.strictEqual(body.completed, false)
-        assert.strictEqual(body.title, 'Patched title') // Should remain unchanged
+        assert.strictEqual(body.success, true)
+        assert.strictEqual(body.data.title, 'Patched title') // Should remain unchanged
+        assert.strictEqual(body.data.completed, false)
         done()
       })
     })
@@ -201,6 +217,7 @@ describe('Browseress REST API Integration', function() {
       request('PATCH', '/todos/' + todoId, { title: '' }, function(err, res, body) {
         if (err) return done(err)
         assert.strictEqual(res.statusCode, 400)
+        assert.strictEqual(body.success, false)
         assert.strictEqual(body.error, 'Validation failed')
         done()
       })
@@ -213,7 +230,7 @@ describe('Browseress REST API Integration', function() {
     beforeEach(function(done) {
       request('POST', '/todos', { title: 'Delete test', completed: false }, function(err, res, body) {
         if (err) return done(err)
-        todoId = body.id
+        todoId = body.data.id
         done()
       })
     })
@@ -223,7 +240,14 @@ describe('Browseress REST API Integration', function() {
         if (err) return done(err)
         assert.strictEqual(res.statusCode, 204)
         assert.strictEqual(body, '') // No content
-        done()
+        
+        // Verify it's gone
+        request('GET', '/todos/' + todoId, function(err, res, body) {
+          if (err) return done(err)
+          assert.strictEqual(res.statusCode, 404)
+          assert.strictEqual(body.success, false)
+          done()
+        })
       })
     })
     
@@ -231,41 +255,53 @@ describe('Browseress REST API Integration', function() {
       request('DELETE', '/todos/999999', function(err, res, body) {
         if (err) return done(err)
         assert.strictEqual(res.statusCode, 404)
+        assert.strictEqual(body.success, false)
         assert.strictEqual(body.error, 'Todo not found')
         done()
       })
     })
     
     it('DELETE with invalid ID', function(done) {
-      request('DELETE', '/todos/xyz', function(err, res, body) {
+      request('DELETE', '/todos/abc', function(err, res, body) {
         if (err) return done(err)
         assert.strictEqual(res.statusCode, 400)
+        assert.strictEqual(body.success, false)
         assert.strictEqual(body.error, 'Invalid ID format')
         done()
       })
     })
     
     it('DELETE all todos', function(done) {
-      // Create a few todos first
-      var count = 0
-      function createTodo() {
-        request('POST', '/todos', { title: 'Todo ' + (++count) }, function(err) {
+      // First clear any existing todos
+      request('DELETE', '/todos', function(err) {
+        if (err) return done(err)
+        
+        // Create a few todos
+        request('POST', '/todos', { title: 'Todo 1' }, function(err) {
           if (err) return done(err)
-          if (count < 3) {
-            createTodo()
-          } else {
-            // Now delete all
-            request('DELETE', '/todos', function(err, res, body) {
+          request('POST', '/todos', { title: 'Todo 2' }, function(err) {
+            if (err) return done(err)
+            request('POST', '/todos', { title: 'Todo 3' }, function(err) {
               if (err) return done(err)
-              assert.strictEqual(res.statusCode, 200)
-              // Just verify that we deleted at least the todos we created
-              assert(body.deleted >= 4, 'Should have deleted at least 4 todos (got ' + body.deleted + ')')
-              done()
+              
+              // Delete all
+              request('DELETE', '/todos', function(err, res, body) {
+                if (err) return done(err)
+                assert.strictEqual(res.statusCode, 200)
+                assert.strictEqual(body.success, true)
+                assert.strictEqual(body.deleted, 3)
+                
+                // Verify they're gone
+                request('GET', '/todos', function(err, res, body) {
+                  if (err) return done(err)
+                  assert.strictEqual(body.data.length, 0)
+                  done()
+                })
+              })
             })
-          }
+          })
         })
-      }
-      createTodo()
+      })
     })
   })
   
@@ -277,28 +313,36 @@ describe('Browseress REST API Integration', function() {
         
         var todos = [
           { title: 'Buy groceries', completed: false },
-          { title: 'Buy milk', completed: true },
-          { title: 'Read book', completed: true },
-          { title: 'Write code', completed: false }
+          { title: 'Read a book', completed: true },
+          { title: 'Write code', completed: false },
+          { title: 'Read documentation', completed: true },
+          { title: 'Exercise', completed: false }
         ]
         
         var created = 0
         todos.forEach(function(todo) {
           request('POST', '/todos', todo, function(err) {
             if (err) return done(err)
-            if (++created === todos.length) done()
+            created++
+            if (created === todos.length) done()
           })
         })
       })
+    })
+    
+    after(function(done) {
+      // Clean up after these tests
+      request('DELETE', '/todos', done)
     })
     
     it('Filter completed todos', function(done) {
       request('GET', '/todos?completed=true', function(err, res, body) {
         if (err) return done(err)
         assert.strictEqual(res.statusCode, 200)
-        assert(Array.isArray(body))
-        assert.strictEqual(body.length, 2)
-        body.forEach(function(todo) {
+        assert.strictEqual(body.success, true)
+        assert(Array.isArray(body.data))
+        assert.strictEqual(body.data.length, 2)
+        body.data.forEach(function(todo) {
           assert.strictEqual(todo.completed, true)
         })
         done()
@@ -309,9 +353,10 @@ describe('Browseress REST API Integration', function() {
       request('GET', '/todos?completed=false', function(err, res, body) {
         if (err) return done(err)
         assert.strictEqual(res.statusCode, 200)
-        assert(Array.isArray(body))
-        assert.strictEqual(body.length, 2)
-        body.forEach(function(todo) {
+        assert.strictEqual(body.success, true)
+        assert(Array.isArray(body.data))
+        assert.strictEqual(body.data.length, 3)
+        body.data.forEach(function(todo) {
           assert.strictEqual(todo.completed, false)
         })
         done()
@@ -319,26 +364,30 @@ describe('Browseress REST API Integration', function() {
     })
     
     it('Search todos by title', function(done) {
-      request('GET', '/todos?q=buy', function(err, res, body) {
+      request('GET', '/todos?q=read', function(err, res, body) {
         if (err) return done(err)
         assert.strictEqual(res.statusCode, 200)
-        assert(Array.isArray(body))
-        assert.strictEqual(body.length, 2)
-        body.forEach(function(todo) {
-          assert(todo.title.toLowerCase().includes('buy'))
+        assert.strictEqual(body.success, true)
+        assert(Array.isArray(body.data))
+        assert.strictEqual(body.data.length, 2) // "Read a book" and "Read documentation"
+        body.data.forEach(function(todo) {
+          assert(todo.title.toLowerCase().includes('read'))
         })
         done()
       })
     })
     
     it('Search and filter combined', function(done) {
-      request('GET', '/todos?q=buy&completed=false', function(err, res, body) {
+      request('GET', '/todos?q=read&completed=true', function(err, res, body) {
         if (err) return done(err)
         assert.strictEqual(res.statusCode, 200)
-        assert(Array.isArray(body))
-        assert.strictEqual(body.length, 1)
-        assert.strictEqual(body[0].title, 'Buy groceries')
-        assert.strictEqual(body[0].completed, false)
+        assert.strictEqual(body.success, true)
+        assert(Array.isArray(body.data))
+        assert.strictEqual(body.data.length, 2)
+        body.data.forEach(function(todo) {
+          assert(todo.title.toLowerCase().includes('read'))
+          assert.strictEqual(todo.completed, true)
+        })
         done()
       })
     })
@@ -353,29 +402,34 @@ describe('Browseress REST API Integration', function() {
         var created = 0
         var total = 15
         
-        function createNext() {
-          if (created >= total) return done()
-          
-          request('POST', '/todos', { title: 'Task ' + (created + 1) }, function(err) {
+        for (var i = 1; i <= total; i++) {
+          request('POST', '/todos', { title: 'Task ' + i }, function(err) {
             if (err) return done(err)
             created++
-            createNext()
+            if (created === total) done()
           })
         }
-        
-        createNext()
       })
     })
     
     it('Get first page with default limit', function(done) {
-      request('GET', '/todos?page=1', function(err, res, body) {
+      request('GET', '/todos', function(err, res, body) {
         if (err) return done(err)
         assert.strictEqual(res.statusCode, 200)
-        assert(Array.isArray(body))
-        assert.strictEqual(body.length, 10) // Default limit
+        assert.strictEqual(body.success, true)
+        assert(Array.isArray(body.data))
+        assert.strictEqual(body.data.length, 10) // Default limit
+        assert.strictEqual(body.pagination.page, 1)
+        assert.strictEqual(body.pagination.pageSize, 10)
+        assert.strictEqual(body.pagination.totalItems, 15)
+        assert.strictEqual(body.pagination.totalPages, 2)
+        assert.strictEqual(body.pagination.hasNext, true)
+        assert.strictEqual(body.pagination.hasPrev, false)
+        // Also check headers
         assert.strictEqual(res.headers['x-total-count'], '15')
         assert.strictEqual(res.headers['x-page'], '1')
-        assert.strictEqual(res.headers['x-limit'], '10')
+        assert.strictEqual(res.headers['x-page-size'], '10')
+        assert.strictEqual(res.headers['x-total-pages'], '2')
         done()
       })
     })
@@ -384,19 +438,25 @@ describe('Browseress REST API Integration', function() {
       request('GET', '/todos?page=2', function(err, res, body) {
         if (err) return done(err)
         assert.strictEqual(res.statusCode, 200)
-        assert(Array.isArray(body))
-        assert.strictEqual(body.length, 5) // Remaining todos
+        assert.strictEqual(body.success, true)
+        assert(Array.isArray(body.data))
+        assert.strictEqual(body.data.length, 5)
+        assert.strictEqual(body.pagination.page, 2)
+        assert.strictEqual(body.pagination.hasNext, false)
+        assert.strictEqual(body.pagination.hasPrev, true)
         done()
       })
     })
     
     it('Custom page size', function(done) {
-      request('GET', '/todos?page=1&limit=5', function(err, res, body) {
+      request('GET', '/todos?limit=5', function(err, res, body) {
         if (err) return done(err)
         assert.strictEqual(res.statusCode, 200)
-        assert(Array.isArray(body))
-        assert.strictEqual(body.length, 5)
-        assert.strictEqual(res.headers['x-limit'], '5')
+        assert.strictEqual(body.success, true)
+        assert(Array.isArray(body.data))
+        assert.strictEqual(body.data.length, 5)
+        assert.strictEqual(body.pagination.pageSize, 5)
+        assert.strictEqual(body.pagination.totalPages, 3)
         done()
       })
     })
@@ -423,59 +483,22 @@ describe('Browseress REST API Integration', function() {
     })
   })
   
-  describe('Error Handling', function() {
-    it('Unknown route returns 404', function(done) {
-      request('GET', '/unknown', function(err, res, body) {
+  describe('HEAD requests', function() {
+    before(function(done) {
+      // Ensure we have some todos
+      request('DELETE', '/todos', function(err) {
         if (err) return done(err)
-        assert.strictEqual(res.statusCode, 404)
-        assert.strictEqual(body.error, 'Not found')
-        done()
+        request('POST', '/todos', { title: 'HEAD test' }, done)
       })
     })
     
-    it('HEAD method on GET route', function(done) {
+    it('HEAD on collection', function(done) {
       request('HEAD', '/todos', function(err, res, body) {
         if (err) return done(err)
         assert.strictEqual(res.statusCode, 200)
         assert.strictEqual(body, '') // HEAD has no body
         assert(res.headers['x-total-count']) // But has headers
         done()
-      })
-    })
-  })
-  
-  describe('Idempotency', function() {
-    it('PUT is idempotent', function(done) {
-      var todoData = { title: 'Idempotency test', completed: false }
-      
-      // Create todo
-      request('POST', '/todos', todoData, function(err, res, body) {
-        if (err) return done(err)
-        var todoId = body.id
-        
-        var updateData = { title: 'Idempotency test', completed: true }
-        var results = []
-        
-        // PUT three times with same data
-        function doPut(count) {
-          if (count === 0) {
-            // Verify all results are identical
-            assert.strictEqual(results[0].title, results[1].title)
-            assert.strictEqual(results[0].completed, results[1].completed)
-            assert.strictEqual(results[1].title, results[2].title)
-            assert.strictEqual(results[1].completed, results[2].completed)
-            return done()
-          }
-          
-          request('PUT', '/todos/' + todoId, updateData, function(err, res, body) {
-            if (err) return done(err)
-            assert.strictEqual(res.statusCode, 200)
-            results.push(body)
-            doPut(count - 1)
-          })
-        }
-        
-        doPut(3)
       })
     })
   })

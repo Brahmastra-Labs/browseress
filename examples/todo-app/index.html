@@ -259,15 +259,29 @@
           const startIndex = (page - 1) * limit;
           const endIndex = page * limit;
           
+          const totalItems = result.length;
+          const totalPages = Math.ceil(totalItems / limit);
           const paginatedResults = result.slice(startIndex, endIndex);
           
           res.set({
-            'X-Total-Count': result.length.toString(),
+            'X-Total-Count': totalItems.toString(),
             'X-Page': page.toString(),
-            'X-Limit': limit.toString()
+            'X-Page-Size': limit.toString(),
+            'X-Total-Pages': totalPages.toString()
           });
           
-          res.json(paginatedResults);
+          res.json({
+            success: true,
+            data: paginatedResults,
+            pagination: {
+              page,
+              pageSize: limit,
+              totalItems,
+              totalPages,
+              hasNext: page < totalPages,
+              hasPrev: page > 1
+            }
+          });
         });
         
         // POST new todo with validation
@@ -275,6 +289,7 @@
           // Validation
           if (!req.body.title || req.body.title.trim().length === 0) {
             return res.status(400).json({ 
+              success: false,
               error: 'Validation failed',
               details: { title: 'Title is required' }
             });
@@ -292,7 +307,10 @@
           
           res.status(201)
             .location(`/todos/${todo.id}`)
-            .json(todo);
+            .json({
+              success: true,
+              data: todo
+            });
         });
         
         // GET single todo
@@ -300,15 +318,24 @@
           const id = parseInt(req.params.id);
           
           if (isNaN(id)) {
-            return res.status(400).json({ error: 'Invalid ID format' });
+            return res.status(400).json({ 
+              success: false,
+              error: 'Invalid ID format' 
+            });
           }
           
           const todo = todos.find(t => t.id === id);
           
           if (todo) {
-            res.json(todo);
+            res.json({
+              success: true,
+              data: todo
+            });
           } else {
-            res.status(404).json({ error: 'Todo not found' });
+            res.status(404).json({ 
+              success: false,
+              error: 'Todo not found' 
+            });
           }
         });
         
@@ -317,12 +344,16 @@
           const id = parseInt(req.params.id);
           
           if (isNaN(id)) {
-            return res.status(400).json({ error: 'Invalid ID format' });
+            return res.status(400).json({ 
+              success: false,
+              error: 'Invalid ID format' 
+            });
           }
           
           // Validation
           if (!req.body.title || req.body.title.trim().length === 0) {
             return res.status(400).json({ 
+              success: false,
               error: 'Validation failed',
               details: { title: 'Title is required' }
             });
@@ -338,9 +369,15 @@
               createdAt: todos[index].createdAt,
               updatedAt: new Date().toISOString()
             };
-            res.json(todos[index]);
+            res.json({
+              success: true,
+              data: todos[index]
+            });
           } else {
-            res.status(404).json({ error: 'Todo not found' });
+            res.status(404).json({ 
+              success: false,
+              error: 'Todo not found' 
+            });
           }
         });
         
@@ -349,7 +386,10 @@
           const id = parseInt(req.params.id);
           
           if (isNaN(id)) {
-            return res.status(400).json({ error: 'Invalid ID format' });
+            return res.status(400).json({ 
+              success: false,
+              error: 'Invalid ID format' 
+            });
           }
           
           const index = todos.findIndex(t => t.id === id);
@@ -359,6 +399,7 @@
             if (req.body.title !== undefined) {
               if (req.body.title.trim().length === 0) {
                 return res.status(400).json({ 
+                  success: false,
                   error: 'Validation failed',
                   details: { title: 'Title cannot be empty' }
                 });
@@ -371,9 +412,15 @@
             }
             
             todos[index].updatedAt = new Date().toISOString();
-            res.json(todos[index]);
+            res.json({
+              success: true,
+              data: todos[index]
+            });
           } else {
-            res.status(404).json({ error: 'Todo not found' });
+            res.status(404).json({ 
+              success: false,
+              error: 'Todo not found' 
+            });
           }
         });
         
@@ -382,7 +429,10 @@
           const id = parseInt(req.params.id);
           
           if (isNaN(id)) {
-            return res.status(400).json({ error: 'Invalid ID format' });
+            return res.status(400).json({ 
+              success: false,
+              error: 'Invalid ID format' 
+            });
           }
           
           const index = todos.findIndex(t => t.id === id);
@@ -391,7 +441,10 @@
             const deleted = todos.splice(index, 1)[0];
             res.status(204).send(); // No content on successful delete
           } else {
-            res.status(404).json({ error: 'Todo not found' });
+            res.status(404).json({ 
+              success: false,
+              error: 'Todo not found' 
+            });
           }
         });
         
@@ -400,7 +453,11 @@
           const count = todos.length;
           todos = [];
           nextId = 1;
-          res.json({ deleted: count });
+          res.json({ 
+            success: true,
+            message: `Deleted ${count} todos`,
+            deleted: count 
+          });
         });
         
         // OPTIONS for CORS preflight
@@ -424,7 +481,10 @@
         
         // 404 handler
         app.use((req, res) => {
-          res.status(404).json({ error: 'Not found' });
+          res.status(404).json({ 
+            success: false,
+            error: 'Not found' 
+          });
         });
         
         // Create transport

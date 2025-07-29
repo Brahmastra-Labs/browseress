@@ -216,3 +216,5 @@ To package as a desktop app with the relay server built-in, consider:
 - Electron with integrated relay
 - Tauri with Rust-based relay
 - PWA with service worker relay
+
+It's a dumb-pipe production.
