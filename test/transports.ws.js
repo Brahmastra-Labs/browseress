@@ -61,7 +61,7 @@ describe('transports', function(){
       
       // Mock connection
       transport.connected = true
-      transport.ws = { send: function(){}, readyState: 1 }
+      transport.ws = { send: function(){}, close: function(){}, readyState: 1 }
       
       var id1 = transport.sendRequest({ method: 'GET', url: '/' }, function(){})
       var id2 = transport.sendRequest({ method: 'POST', url: '/test' }, function(){})
@@ -69,6 +69,9 @@ describe('transports', function(){
       assert.strictEqual(id1, 1)
       assert.strictEqual(id2, 2)
       assert.strictEqual(transport.pendingRequests.size, 2)
+      
+      // Clean up to prevent hanging
+      transport.close()
     })
     
     it('should handle message parsing', function(done){

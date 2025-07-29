@@ -126,6 +126,10 @@
       <h4>DELETE /todos/:id</h4>
       <p>Delete a todo</p>
       <pre>curl -X DELETE http://localhost:8080/todos/1</pre>
+      
+      <h4>DELETE /todos</h4>
+      <p>Delete all todos (useful for testing)</p>
+      <pre>curl -X DELETE http://localhost:8080/todos</pre>
     </div>
   </div>
 
@@ -171,6 +175,22 @@
         
         // Middleware
         app.use((req, res, next) => {
+          // Parse query string
+          const urlParts = req.url.split('?');
+          req.path = urlParts[0];
+          req.query = {};
+          
+          if (urlParts[1]) {
+            const queryString = urlParts[1];
+            const pairs = queryString.split('&');
+            pairs.forEach(pair => {
+              const [key, value] = pair.split('=');
+              if (key) {
+                req.query[decodeURIComponent(key)] = value ? decodeURIComponent(value) : '';
+              }
+            });
+          }
+          
           // Parse JSON body
           if (req.headers['content-type'] === 'application/json') {
             let body = '';
@@ -215,26 +235,76 @@
           });
         });
         
-        // GET all todos
+        // GET all todos with filtering and pagination
         app.get('/todos', (req, res) => {
-          res.json(todos);
+          let result = [...todos];
+          
+          // Filter by completed status
+          if (req.query.completed !== undefined) {
+            const completed = req.query.completed === 'true';
+            result = result.filter(todo => todo.completed === completed);
+          }
+          
+          // Search by title
+          if (req.query.q) {
+            const query = req.query.q.toLowerCase();
+            result = result.filter(todo => 
+              todo.title.toLowerCase().includes(query)
+            );
+          }
+          
+          // Pagination
+          const page = parseInt(req.query.page) || 1;
+          const limit = parseInt(req.query.limit) || 10;
+          const startIndex = (page - 1) * limit;
+          const endIndex = page * limit;
+          
+          const paginatedResults = result.slice(startIndex, endIndex);
+          
+          res.set({
+            'X-Total-Count': result.length.toString(),
+            'X-Page': page.toString(),
+            'X-Limit': limit.toString()
+          });
+          
+          res.json(paginatedResults);
         });
         
-        // POST new todo
+        // POST new todo with validation
         app.post('/todos', (req, res) => {
+          // Validation
+          if (!req.body.title || req.body.title.trim().length === 0) {
+            return res.status(400).json({ 
+              error: 'Validation failed',
+              details: { title: 'Title is required' }
+            });
+          }
+          
           const todo = {
             id: nextId++,
-            title: req.body.title || 'Untitled',
-            completed: req.body.completed || false,
-            createdAt: new Date().toISOString()
+            title: req.body.title.trim(),
+            completed: req.body.completed === true,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
           };
+          
           todos.push(todo);
-          res.status(201).json(todo);
+          
+          res.status(201)
+            .location(`/todos/${todo.id}`)
+            .json(todo);
         });
         
         // GET single todo
         app.get('/todos/:id', (req, res) => {
-          const todo = todos.find(t => t.id === parseInt(req.params.id));
+          const id = parseInt(req.params.id);
+          
+          if (isNaN(id)) {
+            return res.status(400).json({ error: 'Invalid ID format' });
+          }
+          
+          const todo = todos.find(t => t.id === id);
+          
           if (todo) {
             res.json(todo);
           } else {
@@ -242,14 +312,30 @@
           }
         });
         
-        // PUT update todo
+        // PUT full update todo
         app.put('/todos/:id', (req, res) => {
-          const index = todos.findIndex(t => t.id === parseInt(req.params.id));
+          const id = parseInt(req.params.id);
+          
+          if (isNaN(id)) {
+            return res.status(400).json({ error: 'Invalid ID format' });
+          }
+          
+          // Validation
+          if (!req.body.title || req.body.title.trim().length === 0) {
+            return res.status(400).json({ 
+              error: 'Validation failed',
+              details: { title: 'Title is required' }
+            });
+          }
+          
+          const index = todos.findIndex(t => t.id === id);
+          
           if (index !== -1) {
             todos[index] = {
-              ...todos[index],
-              ...req.body,
-              id: todos[index].id,
+              id: id,
+              title: req.body.title.trim(),
+              completed: req.body.completed === true,
+              createdAt: todos[index].createdAt,
               updatedAt: new Date().toISOString()
             };
             res.json(todos[index]);
@@ -258,15 +344,82 @@
           }
         });
         
-        // DELETE todo
-        app.delete('/todos/:id', (req, res) => {
-          const index = todos.findIndex(t => t.id === parseInt(req.params.id));
+        // PATCH partial update todo
+        app.patch('/todos/:id', (req, res) => {
+          const id = parseInt(req.params.id);
+          
+          if (isNaN(id)) {
+            return res.status(400).json({ error: 'Invalid ID format' });
+          }
+          
+          const index = todos.findIndex(t => t.id === id);
+          
           if (index !== -1) {
-            const deleted = todos.splice(index, 1)[0];
-            res.json(deleted);
+            // Only update provided fields
+            if (req.body.title !== undefined) {
+              if (req.body.title.trim().length === 0) {
+                return res.status(400).json({ 
+                  error: 'Validation failed',
+                  details: { title: 'Title cannot be empty' }
+                });
+              }
+              todos[index].title = req.body.title.trim();
+            }
+            
+            if (req.body.completed !== undefined) {
+              todos[index].completed = req.body.completed === true;
+            }
+            
+            todos[index].updatedAt = new Date().toISOString();
+            res.json(todos[index]);
           } else {
             res.status(404).json({ error: 'Todo not found' });
           }
+        });
+        
+        // DELETE todo
+        app.delete('/todos/:id', (req, res) => {
+          const id = parseInt(req.params.id);
+          
+          if (isNaN(id)) {
+            return res.status(400).json({ error: 'Invalid ID format' });
+          }
+          
+          const index = todos.findIndex(t => t.id === id);
+          
+          if (index !== -1) {
+            const deleted = todos.splice(index, 1)[0];
+            res.status(204).send(); // No content on successful delete
+          } else {
+            res.status(404).json({ error: 'Todo not found' });
+          }
+        });
+        
+        // DELETE all todos (for testing)
+        app.delete('/todos', (req, res) => {
+          const count = todos.length;
+          todos = [];
+          nextId = 1;
+          res.json({ deleted: count });
+        });
+        
+        // OPTIONS for CORS preflight
+        app.options('/todos', (req, res) => {
+          res.set({
+            'Allow': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type'
+          });
+          res.status(204).send();
+        });
+        
+        app.options('/todos/:id', (req, res) => {
+          res.set({
+            'Allow': 'GET, PUT, PATCH, DELETE, OPTIONS',
+            'Access-Control-Allow-Methods': 'GET, PUT, PATCH, DELETE, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type'
+          });
+          res.status(204).send();
         });
         
         // 404 handler
