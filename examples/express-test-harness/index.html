@@ -97,6 +97,7 @@
     <div id="status" class="status disconnected">Disconnected</div>
     <button id="startBtn" onclick="startServer()">Start Test Server</button>
     <button id="stopBtn" onclick="stopServer()" disabled>Stop Server</button>
+    <button id="resetBtn" onclick="resetApp()" disabled>Reset App</button>
     <button id="clearBtn" onclick="clearOutput()">Clear Output</button>
     
     <div class="test-selector">
@@ -105,7 +106,6 @@
       </select>
       <button id="loadTestBtn" onclick="loadSelectedTest()" disabled>Load Test</button>
       <button id="runLoadedTestBtn" onclick="runLoadedTest()" disabled>Run Loaded Test</button>
-      <button id="runTestBtn" onclick="runExpressTest()" disabled style="margin-left: 20px;">Run Express Test</button>
     </div>
     
     <div id="testStats" class="test-stats"></div>
@@ -151,12 +151,12 @@
       
       document.getElementById('startBtn').disabled = connected;
       document.getElementById('stopBtn').disabled = !connected;
+      document.getElementById('resetBtn').disabled = !connected;
       
       if (!connected) {
         document.getElementById('testSelect').disabled = true;
         document.getElementById('loadTestBtn').disabled = true;
         document.getElementById('runLoadedTestBtn').disabled = true;
-        document.getElementById('runTestBtn').disabled = true;
       }
     }
     
@@ -202,8 +202,6 @@
           // Enable test selection
           document.getElementById('testSelect').disabled = false;
           document.getElementById('loadTestBtn').disabled = false;
-          // Enable legacy button for E2E tests (keeps old ID for compatibility)
-          document.getElementById('runTestBtn').disabled = false;
         });
         
         transport.on('disconnect', () => {
@@ -234,6 +232,21 @@
         serverStarted = false;
         updateStatus('Disconnected', false);
       }
+    }
+    
+    function resetApp() {
+      log('Resetting application state...', 'status');
+      
+      // Create fresh Express app instance (transport remains stable)
+      app = window.browseress.express();
+      
+      // Create new TestExecutor instance to clear test runner state
+      testExecutor = new TestExecutor();
+      
+      // Clear TestRunner state
+      TestRunner.reset();
+      
+      log('Application state reset complete');
     }
     
     // Simple test runner
@@ -346,14 +359,18 @@
     // Simple supertest-like interface
     function request(app) {
       // Auto-listen the app on transport if not already listening
-      if (window._testTransport && !app._listening) {
+      // Check both _listening flag and if the transport is already set
+      if (window._testTransport && !app._listening && !app._transport) {
         app.listen(window._testTransport);
         app._listening = true;
+        app._transport = window._testTransport;
         console.log('[Test] Auto-listening app on transport');
       }
       
       // Create request object with all HTTP methods from http-stub polyfill
-      const requestObj = {};
+      const requestObj = {
+        _app: app  // Store reference to the app being tested
+      };
       
       // Common HTTP methods
       const methods = [
@@ -367,19 +384,20 @@
       // Add all methods to request object
       methods.forEach(method => {
         requestObj[method] = function(path) {
-          return makeRequest(method.toUpperCase(), path);
+          return makeRequest(method.toUpperCase(), path, app);
         };
       });
       
       return requestObj;
     }
     
-    function makeRequest(method, path) {
+    function makeRequest(method, path, app) {
       const req = {
         method,
         path,
         headers: {},
         body: null,
+        _app: app,  // Store reference to the app
         
         send(data) {
           this.body = data;
@@ -402,6 +420,14 @@
           this.expectedBody = body;
           this.expectCallback = callback;
           
+          // If callback is provided, execute the request immediately (like real supertest)
+          if (callback) {
+            // Use setTimeout to ensure this happens after the current call stack
+            setTimeout(() => {
+              this.end(callback);
+            }, 0);
+          }
+          
           // Return this for chaining
           return this;
         },
@@ -411,28 +437,146 @@
           callback = callback || this.expectCallback;
           
           try {
-            const response = await fetch('http://localhost:8080' + this.path, {
+            // Instead of making HTTP request, simulate request through the app
+            // Get the app from the stored reference
+            const app = this._app;
+            if (!app) {
+              throw new Error('No app provided to request');
+            }
+            
+            // Get the http module from browseress
+            const http = window.browseress.http;
+            
+            // Create mock request object inheriting from IncomingMessage
+            const mockReq = new http.IncomingMessage();
+            Object.assign(mockReq, {
               method: this.method,
+              url: this.path,
+              path: this.path,
               headers: {
-                'Content-Type': 'application/json',
+                'content-type': 'application/json',
                 ...this.headers
               },
-              body: this.body ? JSON.stringify(this.body) : undefined
+              body: this.body,
+              query: {},
+              params: {},
+              // Required by Express
+              httpVersion: '1.1',
+              httpVersionMajor: 1,
+              httpVersionMinor: 1,
+              connection: {
+                remoteAddress: '127.0.0.1'
+              },
+              // Method to get headers
+              get(header) {
+                return this.headers[header.toLowerCase()];
+              },
+              // Stream-like methods Express might expect
+              on() { return this; },
+              once() { return this; },
+              emit() { return this; },
+              pipe() { return this; },
+              resume() { return this; },
+              pause() { return this; }
             });
             
-            const text = await response.text();
+            let responseData = '';
+            let responseHeaders = {};
+            let responseStatus = 200;
+            
+            // Create mock response object inheriting from ServerResponse
+            const mockRes = new http.ServerResponse();
+            
+            // Store original end method
+            const originalEnd = mockRes.end;
+            
+            // Override methods to capture data
+            mockRes.end = function(data) {
+              if (data) responseData = data;
+              responseStatus = this.statusCode;
+              responseHeaders = this.headers;
+              // Call original end to emit events
+              return originalEnd.call(this, data);
+            };
+            
+            // Override write to capture data
+            const originalWrite = mockRes.write;
+            mockRes.write = function(chunk) {
+              responseData += chunk;
+              return originalWrite.call(this, chunk);
+            };
+            
+            // Express-specific methods (these will be added by Express prototype chain)
+            mockRes.status = function(code) {
+              this.statusCode = code;
+              return this;
+            };
+            
+            mockRes.json = function(data) {
+              this.setHeader('Content-Type', 'application/json; charset=utf-8');
+              this.end(JSON.stringify(data));
+            };
+            
+            mockRes.send = function(data) {
+              if (typeof data === 'object') {
+                this.json(data);
+              } else {
+                this.end(data);
+              }
+            };
+            
+            mockRes.type = function(contentType) {
+              this.setHeader('Content-Type', contentType);
+              return this;
+            };
+            
+            // Handle the request through the app
+            console.log('[Request] Handling through app.handle...');
+            await new Promise((resolve, reject) => {
+              const timeout = setTimeout(() => {
+                console.error('[Request] Timeout after 5 seconds');
+                console.error('[Request] mockRes.finished:', mockRes.finished);
+                console.error('[Request] mockRes.headersSent:', mockRes.headersSent);
+                reject(new Error('Request timeout'));
+              }, 5000);
+              
+              // Listen for finish event to know when response is complete
+              mockRes.once('finish', () => {
+                console.log('[Request] Response finished');
+                clearTimeout(timeout);
+                resolve();
+              });
+              
+              try {
+                console.log('[Request] Calling app.handle with mockReq:', mockReq.method, mockReq.path);
+                app.handle(mockReq, mockRes, (err) => {
+                  console.log('[Request] app.handle callback called, err:', err);
+                  if (err) {
+                    clearTimeout(timeout);
+                    reject(err);
+                  }
+                  // Note: Don't resolve here, wait for 'finish' event
+                });
+              } catch (err) {
+                console.error('[Request] Error calling app.handle:', err);
+                clearTimeout(timeout);
+                reject(err);
+              }
+            });
+            
+            // Parse response data
             let body;
             try {
-              body = JSON.parse(text);
+              body = JSON.parse(responseData);
             } catch (e) {
-              body = text;
+              body = responseData;
             }
             
             const res = {
-              status: response.status,
-              headers: Object.fromEntries(response.headers.entries()),
+              status: responseStatus || mockRes.statusCode,
+              headers: responseHeaders,
               body: body,
-              text: text
+              text: responseData
             };
             
             // Check expectations
@@ -539,49 +683,45 @@
     async function runLoadedTest() {
       if (!currentTestCode) {
         log('No test loaded', 'error');
+        window._testCompletionPromise = Promise.resolve({ error: 'No test loaded', passed: 0, failed: -1 });
         return;
       }
       
       if (!serverStarted || !transport) {
         log('Error: Server not connected. Click "Start Test Server" first.', 'error');
+        window._testCompletionPromise = Promise.resolve({ error: 'Server not connected', passed: 0, failed: -1 });
         return;
       }
       
       // Don't clear output immediately - preserve loading messages
       log(`\nRunning test: ${currentTestMetadata.name}\n`);
       
-      try {
+      // Create a promise that Playwright can wait for
+      window._testCompletionPromise = new Promise(async (resolve) => {
+        try {
+        console.log('[Test] Starting test execution...');
         // Store the transport globally so supertest mock can use it
         window._testTransport = transport;
-        
-        // Reset test runner
-        TestRunner.reset();
-        
-        // Execute the test to register all describe/it blocks
-        console.log('[Test] Evaluating transformed code...');
-        let testFunction;
-        try {
-          testFunction = eval(currentTestCode);
-          console.log('[Test] Test function created, type:', typeof testFunction);
-        } catch (error) {
-          log(`Failed to evaluate test code: ${error.message}`, 'error');
-          console.error('Eval error:', error);
-          return;
-        }
         
         // Make request function available globally for the test
         window.supertest = request;
         
-        // Call the test function with our context to register tests
-        console.log('[Test] Calling test function to register tests...');
-        try {
-          testFunction({
-          describe: TestRunner.describe.bind(TestRunner),
-          it: TestRunner.it.bind(TestRunner),
-          before: TestRunner.before.bind(TestRunner),
-          after: TestRunner.after.bind(TestRunner),
-          beforeEach: TestRunner.beforeEach,
-          afterEach: TestRunner.afterEach,
+        // Check dependencies
+        console.log('[Test] Checking dependencies...');
+        console.log('[Test] window.assert:', window.assert);
+        console.log('[Test] window.browseress:', window.browseress);
+        console.log('[Test] window.browseress.express:', window.browseress?.express);
+        console.log('[Test] window.after:', window.after);
+        console.log('[Test] window.testUtils:', window.testUtils);
+        
+        // Create test context
+        const testContext = {
+          describe: null, // Will be set by executor
+          it: null,      // Will be set by executor
+          before: null,  // Will be set by executor
+          after: null,   // Will be set by executor
+          beforeEach: null,
+          afterEach: null,
           expect,
           assert: window.assert,
           request: window.supertest,
@@ -589,28 +729,54 @@
           transport,
           after: window.after,
           testUtils: window.testUtils
-        });
-        } catch (error) {
-          log(`Failed to execute test function: ${error.message}`, 'error');
-          console.error('Test execution error:', error);
+        };
+        
+        // Execute the test using TestExecutor
+        console.log('[Test] Using TestExecutor to run tests...');
+        console.log('[Test] Test code length:', currentTestCode.length);
+        console.log('[Test] Test code preview:', currentTestCode.substring(0, 200));
+        const startTime = Date.now();
+        
+        const executionResult = await testExecutor.executeTest(currentTestCode, testContext);
+        
+        const duration = Date.now() - startTime;
+        
+        if (!executionResult.success) {
+          log(`Failed to execute test: ${executionResult.error}`, 'error');
+          if (executionResult.stack) {
+            console.error('Stack trace:', executionResult.stack);
+          }
+          // Resolve with error info
+          resolve({ error: executionResult.error, passed: 0, failed: -1 });
           return;
         }
         
-        console.log('[Test] Test function called, checking registered tests...');
-        console.log('[Test] Registered tests:', TestRunner.tests.length);
-        
-        // If no tests were registered, there was likely a silent error
-        if (TestRunner.tests.length === 0) {
-          log('WARNING: No tests were registered. This usually means an error occurred during test setup.', 'error');
-          log('Check the browser console for detailed error messages.', 'error');
-        }
-        
-        // Now that tests are registered, run them
         log('Express app started on http://localhost:8080\n');
         
-        const startTime = Date.now();
-        const testResults = await TestRunner.run();
-        const duration = Date.now() - startTime;
+        // Display all test results from executor
+        const results = executionResult.results || [];
+        let passed = 0;
+        let failed = 0;
+        
+        results.forEach(result => {
+          if (result.suite !== 'root') {
+            log(`\n${result.suite}`);
+          }
+          
+          if (result.status === 'passed') {
+            log(`  ✓ ${result.name}`, 'pass');
+            passed++;
+          } else if (result.status === 'failed') {
+            log(`  ✗ ${result.name}`, 'fail');
+            log(`    ${result.error}`, 'error');
+            if (result.stack) {
+              console.error('Stack trace:', result.stack);
+            }
+            failed++;
+          }
+        });
+        
+        const testResults = { passed, failed };
         
         // Display results
         log(`\n${'='.repeat(50)}`);
@@ -625,13 +791,19 @@
           log('\n❌ Some tests failed', 'fail');
         }
         
+        // Resolve the promise with the final results
+        resolve(testResults);
+        
       } catch (error) {
         log(`Error running test: ${error.message}`, 'error');
         console.error(error);
+        // Resolve with error info so Playwright doesn't hang
+        resolve({ error: error.message, passed: 0, failed: -1 });
       } finally {
         // Clean up
         app = null;
       }
+    });
     }
     
     // Update test statistics display
@@ -656,140 +828,13 @@
       statsDiv.innerHTML = html;
     }
     
-    // Run an Express test (legacy function for compatibility)
-    async function runExpressTest() {
-      if (!serverStarted || !transport) {
-        log('Error: Server not connected. Click "Start Test Server" first.', 'error');
-        return;
-      }
-      
-      clearOutput();
-      log('Running Express Test Suite...\n');
-      
-      try {
-        // Reset test runner
-        TestRunner.reset();
-        
-        // Define a simple Express test
-        const { describe, it, before, after } = TestRunner;
-        const express = window.browseress.express;
-        
-        describe('res.json() - Express Test', function() {
-          before(async function() {
-            // Create Express app
-            app = express();
-            
-            // Store transport globally for supertest
-            window._testTransport = transport;
-            
-            // Add CORS middleware
-            app.use((req, res, next) => {
-              res.header('Access-Control-Allow-Origin', '*');
-              res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-              res.header('Access-Control-Allow-Headers', 'Content-Type');
-              if (req.method === 'OPTIONS') {
-                return res.sendStatus(200);
-              }
-              next();
-            });
-            
-            app.get('/json', function(req, res) {
-              res.json({ name: 'tobi' });
-            });
-            
-            app.get('/json-number', function(req, res) {
-              res.json(200);
-            });
-            
-            app.get('/json-string', function(req, res) {
-              res.json('hello');
-            });
-            
-            app.get('/json-null', function(req, res) {
-              res.json(null);
-            });
-            
-            // Use the existing transport connection
-            app.listen(transport);
-            
-            log('Express app started on http://localhost:8080\n');
-          });
-          
-          after(function() {
-            // Don't close transport, just clear the app
-            app = null;
-          });
-          
-          it('should respond with json object', async function() {
-            try {
-              const res = await request(app)
-                .get('/json')
-                .expect(200)
-                .end();
-              
-              expect(res.headers['content-type']).toContain('application/json');
-              expect(res.body).toEqual({ name: 'tobi' });
-            } catch (err) {
-              console.error('Test error details:', err);
-              throw err;
-            }
-          });
-          
-          it('should respond with json number', async function() {
-            const res = await request(app)
-              .get('/json-number')
-              .expect(200)
-              .end();
-            
-            expect(res.headers['content-type']).toContain('application/json');
-            expect(res.text).toBe('200');
-          });
-          
-          it('should respond with json string', async function() {
-            const res = await request(app)
-              .get('/json-string')
-              .expect(200)
-              .end();
-            
-            expect(res.headers['content-type']).toContain('application/json');
-            expect(res.text).toBe('"hello"');
-          });
-          
-          it('should respond with json null', async function() {
-            const res = await request(app)
-              .get('/json-null')
-              .expect(200)
-              .end();
-            
-            expect(res.headers['content-type']).toContain('application/json');
-            expect(res.text).toBe('null');
-          });
-        });
-        
-        // Run the tests
-        const results = await TestRunner.run();
-        
-        log(`\n${'='.repeat(50)}`);
-        log(`Tests: ${results.passed} passed, ${results.failed} failed, ${results.passed + results.failed} total`);
-        
-        if (results.failed === 0) {
-          log('\n✅ All Express tests passed in Browseress!', 'pass');
-        } else {
-          log('\n❌ Some tests failed', 'fail');
-        }
-        
-      } catch (err) {
-        log(`\nError running tests: ${err.message}`, 'error');
-        console.error(err);
-      }
-    }
-    
     // Initialize on load
     window.addEventListener('load', () => {
       log('Express Test Harness loaded');
       log('This harness demonstrates running Express.js tests in the browser.');
       log('\n1. Click "Start Test Server" to connect to relay server');
-      log('2. Click "Run Express Test" to run the test suite');
+      log('2. Select a test suite from the dropdown and click "Load Test"');
+      log('3. Click "Run Loaded Test" to execute the test suite');
       log('\nMake sure relay server is running on port 3001!');
     });
   </script>

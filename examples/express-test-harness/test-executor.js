@@ -19,6 +19,7 @@ class TestExecutor {
       console.log('[TestExecutor] Preparing to execute test');
       console.log('[TestExecutor] Code type:', typeof transformedCode);
       console.log('[TestExecutor] Code preview:', transformedCode.substring(0, 200) + '...');
+      console.log('[TestExecutor] Test context keys:', Object.keys(testContext));
       
       // Create the test function
       // The transformed code is already a function string, so we evaluate it directly

@@ -9,9 +9,31 @@ test.describe('Express Test Harness - Dynamic Test Loading', () => {
     });
     page = await context.newPage();
     
+    // Capture console logs
+    page.on('console', msg => {
+      const type = msg.type();
+      const text = msg.text();
+      console.log(`[Browser ${type}] ${text}`);
+    });
+    
+    // Capture page errors
+    page.on('pageerror', error => {
+      console.error('[Browser Error]', error.message);
+    });
+    
     // Open test harness
-    await page.goto('/examples/express-test-harness/');
-    await page.waitForSelector('#startBtn');
+    console.log('Navigating to test harness...');
+    const response = await page.goto('/examples/express-test-harness/', { waitUntil: 'networkidle' });
+    console.log('Page response status:', response.status());
+    console.log('Page URL:', page.url());
+    
+    // Check if page loaded
+    const title = await page.title();
+    console.log('Page title:', title);
+    
+    // Wait for start button
+    console.log('Waiting for start button...');
+    await page.waitForSelector('#startBtn', { timeout: 10000 });
     
     // Click start button
     await page.click('#startBtn');
@@ -124,6 +146,9 @@ test.describe('Express Test Harness - Dynamic Test Loading', () => {
   // Test each Express test suite
   for (const suite of testSuites) {
     test(`should run ${suite.name} tests dynamically`, async () => {
+      // Reset app state before each test suite
+      await page.evaluate(() => resetApp());
+      
       // Select the test from dropdown
       await page.selectOption('#testSelect', suite.name);
       
@@ -131,10 +156,10 @@ test.describe('Express Test Harness - Dynamic Test Loading', () => {
       await page.click('#loadTestBtn');
       
       // Wait for test to load
-      await page.waitForFunction((testName) => {
+      await page.waitForFunction(() => {
         const output = document.querySelector('.test-output');
         return output && output.textContent.includes(`Test loaded successfully`);
-      }, suite.name, { timeout: 5000 });
+      }, { timeout: 5000 });
       
       // Verify test category
       const statsText = await page.locator('#testStats').textContent();
@@ -144,79 +169,91 @@ test.describe('Express Test Harness - Dynamic Test Loading', () => {
       // Wait for Run Loaded Test button to be enabled
       await expect(page.locator('#runLoadedTestBtn')).toBeEnabled({ timeout: 5000 });
       
-      // Click Run Loaded Test button
-      await page.click('#runLoadedTestBtn');
+      // THIS IS THE NEW, CORRECT, ATOMIC WAY:
+      // Click the button and wait for the promise in a single atomic operation
+      console.log('About to run test:', suite.name);
       
-      // Wait for tests to complete
-      await page.waitForFunction(() => {
-        const output = document.querySelector('.test-output');
-        if (!output) return false;
-        const text = output.textContent;
-        return text.includes('Tests:') && (text.includes('passed') || text.includes('failed'));
-      }, { timeout: 30000 });
+      // First, let's check for any console errors
+      page.on('console', msg => {
+        if (msg.type() === 'error') {
+          console.error('Browser console error:', msg.text());
+        }
+      });
       
-      // Get test output
+      // Add a timeout handler to check state
+      const timeoutId = setTimeout(async () => {
+        console.log('=== TIMEOUT DEBUG INFO ===');
+        try {
+          const hasPromise = await page.evaluate(() => !!window._testCompletionPromise);
+          console.log('Has _testCompletionPromise:', hasPromise);
+          
+          const testOutput = await page.locator('.test-output').textContent();
+          console.log('Last test output:', testOutput.split('\n').slice(-10).join('\n'));
+        } catch (e) {
+          console.error('Error getting debug info:', e.message);
+        }
+      }, 20000); // Log after 20 seconds
+      
+      const finalResults = await page.evaluate(async () => {
+        // 1. Find and click the button from INSIDE the browser context
+        const button = document.getElementById('runLoadedTestBtn');
+        if (!button) {
+          throw new Error('Run Loaded Test button not found');
+        }
+        
+        console.log('Clicking button...');
+        button.click();
+        
+        // 2. Wait a moment for the promise to be created
+        let attempts = 0;
+        while (!window._testCompletionPromise && attempts < 100) {
+          await new Promise(resolve => setTimeout(resolve, 50));
+          attempts++;
+        }
+        
+        if (!window._testCompletionPromise) {
+          throw new Error('_testCompletionPromise was not created after clicking button');
+        }
+        
+        console.log('Promise found, waiting for completion...');
+        
+        // 3. Return the promise that the click handler creates.
+        //    Playwright will automatically wait for this promise to resolve.
+        return window._testCompletionPromise;
+      });
+      
+      // NOW it is safe to proceed with assertions, because the code
+      // will only reach here after the promise has resolved.
+      clearTimeout(timeoutId);
+      console.log('On-page test suite finished with result:', finalResults);
+      
+      // Verify test results from promise
+      expect(finalResults).toBeDefined();
+      expect(finalResults.error).toBeUndefined();
+      expect(finalResults.passed).toBeGreaterThanOrEqual(0);
+      expect(finalResults.failed).toBeGreaterThanOrEqual(0);
+      
+      const totalTests = finalResults.passed + finalResults.failed;
+      expect(totalTests).toBeGreaterThan(0);
+      console.log(`${suite.name}: ${finalResults.passed} passed, ${finalResults.failed} failed, ${totalTests} total`);
+      
+      // Check if the test count roughly matches expected
+      // Allow some variance as tests may be added/removed
+      if (suite.expectedTests.length > 0) {
+        expect(totalTests).toBeGreaterThanOrEqual(Math.floor(suite.expectedTests.length * 0.8));
+      }
+      
+      // Get test output for additional verification
       const output = await page.locator('.test-output').textContent();
       console.log(`\n=== ${suite.name} Results ===`);
-      console.log(output);
       
       // Verify Express app started
       expect(output).toContain('Express app started on http://localhost:8080');
-      
-      // Check for test completion
-      expect(output).toMatch(/Tests: \d+ passed, \d+ failed, \d+ total/);
-      
-      // Verify at least some tests ran
-      const match = output.match(/Tests: (\d+) passed, (\d+) failed, (\d+) total/);
-      if (match) {
-        const [_, passed, failed, total] = match;
-        const totalTests = parseInt(total);
-        expect(totalTests).toBeGreaterThan(0);
-        console.log(`${suite.name}: ${passed} passed, ${failed} failed, ${total} total`);
-        
-        // Check if the test count roughly matches expected
-        // Allow some variance as tests may be added/removed
-        if (suite.expectedTests.length > 0) {
-          expect(totalTests).toBeGreaterThanOrEqual(Math.floor(suite.expectedTests.length * 0.8));
-        }
-      }
       
       // Clear output for next test
       await page.click('#clearBtn');
     });
   }
-
-  // Legacy compatibility test
-  test('should maintain backward compatibility with legacy Run Express Test button', async () => {
-    // Click the legacy Run Express Test button
-    await page.click('#runTestBtn');
-    
-    // Wait for tests to start
-    await page.waitForFunction(() => {
-      const output = document.querySelector('.test-output');
-      return output && output.textContent.includes('Running Express Test Suite');
-    }, { timeout: 5000 });
-    
-    // Wait for completion
-    await page.waitForFunction(() => {
-      const output = document.querySelector('.test-output');
-      if (!output) return false;
-      const text = output.textContent;
-      return text.includes('Tests:') && (text.includes('passed') || text.includes('failed'));
-    }, { timeout: 30000 });
-    
-    // Get test results
-    const output = await page.locator('.test-output').textContent();
-    
-    // Verify legacy test still works
-    expect(output).toContain('res.json() - Express Test');
-    expect(output).toContain('✓ should respond with json object');
-    expect(output).toContain('✓ should respond with json number');
-    expect(output).toContain('✓ should respond with json string');
-    expect(output).toContain('✓ should respond with json null');
-    expect(output).toContain('4 passed, 0 failed');
-    expect(output).toContain('✅ All Express tests passed in Browseress!');
-  });
 
   test('should handle test transformation and categorization', async () => {
     // Test that the harness properly categorizes tests

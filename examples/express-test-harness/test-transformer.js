@@ -91,6 +91,7 @@ class TestTransformer {
     const requireMap = {
       '../': 'window.browseress.express',
       '..': 'window.browseress.express',
+      '../.': 'window.browseress.express',  // Handle require('../.')
       'express': 'window.browseress.express',
       'supertest': 'window.supertest',
       'node:assert': 'window.assert',

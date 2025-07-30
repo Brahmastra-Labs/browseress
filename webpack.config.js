@@ -42,7 +42,8 @@ module.exports = {
     },
     fallback: {
       // Node.js polyfills for browser
-      'events': require.resolve('events/'),
+      'events': path.resolve(__dirname, 'lib/polyfills/events.js'),
+      'node:events': path.resolve(__dirname, 'lib/polyfills/events.js'),
       'buffer': require.resolve('buffer/'),
       'path': path.resolve(__dirname, 'lib/polyfills/path.js'),
       'http': path.resolve(__dirname, 'lib/polyfills/http-stub.js'),
@@ -84,7 +85,10 @@ module.exports = {
             resource.request = path.resolve(__dirname, 'lib/polyfills/fs-opfs-adapter.js');
             break;
           case 'events':
-            resource.request = 'events';
+            resource.request = path.resolve(__dirname, 'lib/polyfills/events.js');
+            break;
+          case 'node:events':
+            resource.request = path.resolve(__dirname, 'lib/polyfills/events.js');
             break;
           case 'buffer':
             resource.request = 'buffer';

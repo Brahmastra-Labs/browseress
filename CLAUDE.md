@@ -1,5 +1,7 @@
 # Browser Express (Browseress) - Development Progress
 
+READ ENTIRE FILES WHEN BROWSING CODE. THE DEFAULT BEHAVIOUR SHOULD BE TO READ FILES.
+
 ## Project Overview
 Creating a browser-compatible version of Express.js that runs entirely in the browser using OPFS (Origin Private File System) and communicates with a local relay server via WebSockets.
 
