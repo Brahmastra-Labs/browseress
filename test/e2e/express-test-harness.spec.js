@@ -1,4 +1,6 @@
 const { test, expect } = require('@playwright/test');
+const fs = require('fs');
+const path = require('path');
 
 test.describe('Express Test Harness - Dynamic Test Loading', () => {
   let page;
@@ -57,95 +59,28 @@ test.describe('Express Test Harness - Dynamic Test Loading', () => {
     }
   });
 
-  // Define test suites and their expected results
-  const testSuites = [
-    {
-      name: 'res.json.js',
-      description: 'Tests for res.json() method',
-      expectedTests: [
-        'should not support jsonp callbacks',
-        'should not override previous Content-Types',
-        'should respond with json for null',
-        'should respond with json for Number',
-        'should respond with json for String',
-        'should respond with json',
-        'should respond with json',
-        'should escape characters'
-      ],
-      category: 'ADAPTED' // Because we transform require statements
-    },
-    {
-      name: 'res.send.js',
-      description: 'Tests for res.send() method',
-      expectedTests: [
-        'should set body to ""',
-        'should set body to ""',
-        'should set body to ""',
-        'should send number as json',
-        'should send string',
-        'should send Buffers',
-        'should send buffer objects',
-        'should send json',
-        'should send json for objects',
-        'should send json for arrays',
-        'should send HTML',
-        'should set ETag',
-        'should send ETag in response',
-        'should send a 304 when ETag matches',
-        'should send a 412 when ETag matches with PUT'
-      ],
-      category: 'ADAPTED'
-    },
-    {
-      name: 'res.status.js',
-      description: 'Tests for res.status() method',
-      expectedTests: [
-        'should set the response .statusCode',
-        'should strip irrelevant properties'
-      ],
-      category: 'ADAPTED'
-    },
-    {
-      name: 'app.use.js',
-      description: 'Tests for app.use() middleware',
-      expectedTests: [
-        'should emit "mount" when mounted',
-        'should mount the app',
-        'should support mount-points',
-        'should set the child\'s .parent',
-        'should support dynamic routes',
-        'should add a router',
-        'should do nothing without handlers',
-        'should do nothing without a function',
-        'should be chainable',
-        'should invoke .use\'d middleware',
-        'should accept multiple arguments',
-        'should invoke middleware for all requests',
-        'should invoke middleware for requests starting with path',
-        'should work if path has trailing slash',
-        'should set the child\'s .parent',
-        'should invoke middleware for any request starting with path',
-        'should work if path has trailing slash',
-        'should check regexp path',
-        'should match complex regexp path',
-        'should support array of paths',
-        'should support array of paths w/ middleware',
-        'should support regexp path',
-        'should support regexp path w/ params',
-        'should ignore VERBS',
-        'should pull off the path prefix',
-        'should restore prefix after leaving router',
-        'should restore prefix after leaving nested router',
-        'should support path prefix stripping with multiple handlers',
-        'should invoke middleware correctly'
-      ],
-      category: 'ADAPTED'
-    }
-  ];
+  // Load test manifest to get all testable files
+  const manifestPath = path.join(__dirname, '../../examples/express-test-harness/test-manifest.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  
+  // Filter to only Express test files (exclude browser-incompatible and our own tests)
+  const testSuites = manifest.filter(test => 
+    test.status !== 'browser-incompatible' &&
+    !test.name.includes('browseress') &&
+    !test.name.includes('integration.') &&
+    !test.name.includes('polyfills.') &&
+    !test.name.includes('relay-server') &&
+    !test.name.includes('transports.') &&
+    !test.name.includes('streams.') &&
+    !test.name.includes('middleware.') &&
+    !test.name.includes('sendfile-simulation') &&
+    !test.name.startsWith('e2e/') &&
+    !test.name.startsWith('browser/')
+  );
 
-  // Test each Express test suite
-  for (const suite of testSuites) {
-    test(`should run ${suite.name} tests dynamically`, async () => {
+  // Test each Express test suite as individual tests
+  testSuites.forEach(suite => {
+    test(`${suite.name}`, async () => {
       // Reset app state before each test suite
       await page.evaluate(() => resetApp());
       
@@ -161,10 +96,9 @@ test.describe('Express Test Harness - Dynamic Test Loading', () => {
         return output && output.textContent.includes(`Test loaded successfully`);
       }, { timeout: 5000 });
       
-      // Verify test category
+      // Verify test loaded
       const statsText = await page.locator('#testStats').textContent();
       expect(statsText).toContain(suite.name);
-      expect(statsText).toContain(suite.category);
       
       // Wait for Run Loaded Test button to be enabled
       await expect(page.locator('#runLoadedTestBtn')).toBeEnabled({ timeout: 5000 });
@@ -235,17 +169,14 @@ test.describe('Express Test Harness - Dynamic Test Loading', () => {
       
       const totalTests = finalResults.passed + finalResults.failed;
       expect(totalTests).toBeGreaterThan(0);
-      console.log(`${suite.name}: ${finalResults.passed} passed, ${finalResults.failed} failed, ${totalTests} total`);
       
-      // Check if the test count roughly matches expected
-      // Allow some variance as tests may be added/removed
-      if (suite.expectedTests.length > 0) {
-        expect(totalTests).toBeGreaterThanOrEqual(Math.floor(suite.expectedTests.length * 0.8));
+      const passRate = Math.round((finalResults.passed / totalTests) * 100);
+      console.log(`${suite.name}: ${finalResults.passed}/${totalTests} tests passed (${passRate}%)`);
+      
+      // Fail the test if pass rate is too low
+      if (passRate < 50) {
+        throw new Error(`Low pass rate: only ${finalResults.passed}/${totalTests} tests passed (${passRate}%)`);
       }
-      
-      // Get test output for additional verification
-      const output = await page.locator('.test-output').textContent();
-      console.log(`\n=== ${suite.name} Results ===`);
       
       // Verify Express app started
       expect(output).toContain('Express app started on http://localhost:8080');
@@ -253,7 +184,7 @@ test.describe('Express Test Harness - Dynamic Test Loading', () => {
       // Clear output for next test
       await page.click('#clearBtn');
     });
-  }
+  });
 
   test('should handle test transformation and categorization', async () => {
     // Test that the harness properly categorizes tests

@@ -352,6 +352,27 @@
           if (actual !== undefined) {
             throw new Error(`Expected ${actual} to be undefined`);
           }
+        },
+        toMatch(expected) {
+          if (!actual.match(expected)) {
+            throw new Error(`Expected "${actual}" to match ${expected}`);
+          }
+        },
+        toThrow(expectedError) {
+          let threw = false;
+          let actualError;
+          try {
+            actual();
+          } catch (err) {
+            threw = true;
+            actualError = err;
+          }
+          if (!threw) {
+            throw new Error(`Expected function to throw`);
+          }
+          if (expectedError && actualError.message !== expectedError) {
+            throw new Error(`Expected error "${expectedError}" but got "${actualError.message}"`);
+          }
         }
       };
     }
@@ -492,7 +513,15 @@
             
             // Override methods to capture data
             mockRes.end = function(data) {
-              if (data) responseData = data;
+              if (data) {
+                // Only set responseData if nothing has been written yet
+                if (!responseData) {
+                  responseData = data;
+                } else {
+                  // Append to existing data
+                  responseData += data;
+                }
+              }
               responseStatus = this.statusCode;
               responseHeaders = this.headers;
               // Call original end to emit events
@@ -506,29 +535,8 @@
               return originalWrite.call(this, chunk);
             };
             
-            // Express-specific methods (these will be added by Express prototype chain)
-            mockRes.status = function(code) {
-              this.statusCode = code;
-              return this;
-            };
-            
-            mockRes.json = function(data) {
-              this.setHeader('Content-Type', 'application/json; charset=utf-8');
-              this.end(JSON.stringify(data));
-            };
-            
-            mockRes.send = function(data) {
-              if (typeof data === 'object') {
-                this.json(data);
-              } else {
-                this.end(data);
-              }
-            };
-            
-            mockRes.type = function(contentType) {
-              this.setHeader('Content-Type', contentType);
-              return this;
-            };
+            // Don't override Express methods - let Express add them through prototype chain
+            // This ensures we get the real Express behavior including JSON spacing, etc.
             
             // Handle the request through the app
             console.log('[Request] Handling through app.handle...');
@@ -784,6 +792,25 @@
         log(`Category: ${currentTestMetadata.category}`);
         log(`Duration: ${duration}ms`);
         log(`Tests: ${testResults.passed} passed, ${testResults.failed} failed, ${testResults.passed + testResults.failed} total`);
+        
+        // Show common error patterns
+        const errorPatterns = {};
+        results.forEach(result => {
+          if (result.status === 'failed' && result.error) {
+            const pattern = result.error.match(/(\w+Error): (.+?)(?:\n|$)/)?.[0] || result.error.substring(0, 50);
+            errorPatterns[pattern] = (errorPatterns[pattern] || 0) + 1;
+          }
+        });
+        
+        if (Object.keys(errorPatterns).length > 0) {
+          log('\nCommon errors:');
+          Object.entries(errorPatterns)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 5)
+            .forEach(([error, count]) => {
+              log(`  ${count}x: ${error}`, 'error');
+            });
+        }
         
         if (testResults.failed === 0) {
           log('\n✅ All tests passed!', 'pass');

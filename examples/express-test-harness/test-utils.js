@@ -136,11 +136,26 @@
   const Buffer = {
     from: function(string, encoding) {
       if (typeof string === 'string') {
-        return {
-          toString: function() { return string; },
-          length: string.length,
-          _isBuffer: true
+        // Convert string to Uint8Array for better compatibility
+        const encoder = new TextEncoder();
+        const bytes = encoder.encode(string);
+        const buf = Object.create(Buffer.prototype);
+        buf._bytes = bytes;
+        buf.length = bytes.length;
+        buf._isBuffer = true;
+        buf.toString = function() { return string; };
+        return buf;
+      }
+      if (string instanceof ArrayBuffer || string instanceof Uint8Array) {
+        const buf = Object.create(Buffer.prototype);
+        buf._bytes = new Uint8Array(string);
+        buf.length = buf._bytes.length;
+        buf._isBuffer = true;
+        buf.toString = function() { 
+          const decoder = new TextDecoder();
+          return decoder.decode(this._bytes);
         };
+        return buf;
       }
       return string;
     },
@@ -150,10 +165,41 @@
     },
     
     concat: function(list) {
-      const strings = list.map(buf => buf.toString());
-      const result = strings.join('');
+      const totalLength = list.reduce((sum, buf) => sum + buf.length, 0);
+      const result = new Uint8Array(totalLength);
+      let offset = 0;
+      for (const buf of list) {
+        result.set(buf._bytes || new TextEncoder().encode(buf.toString()), offset);
+        offset += buf.length;
+      }
       return Buffer.from(result);
-    }
+    },
+    
+    byteLength: function(string, encoding) {
+      if (typeof string === 'string') {
+        // Use TextEncoder to get accurate byte length
+        return new TextEncoder().encode(string).length;
+      }
+      return string.length || 0;
+    },
+    
+    alloc: function(size) {
+      const buf = Object.create(Buffer.prototype);
+      buf._bytes = new Uint8Array(size);
+      buf.length = size;
+      buf._isBuffer = true;
+      buf.toString = function() {
+        const decoder = new TextDecoder();
+        return decoder.decode(this._bytes);
+      };
+      return buf;
+    },
+    
+    allocUnsafe: function(size) {
+      return Buffer.alloc(size);
+    },
+    
+    prototype: {}
   };
 
   /**
@@ -199,6 +245,9 @@
   window.after = after;
   window.assert = assert;
   window.testUtils = testUtils;
+  
+  // Make Buffer globally available since many modules expect it
+  window.Buffer = Buffer;
   
   // Also export as a module-like object
   window.testUtilities = {

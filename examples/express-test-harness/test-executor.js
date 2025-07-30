@@ -321,12 +321,17 @@ class TestExecutor {
       
       // Run the test
       try {
+        console.log(`[TestExecutor] Running test: "${test.name}"`);
         await this.runHookOrTest(test.fn, `test "${test.name}"`);
         test.status = 'passed';
+        console.log(`[TestExecutor] ✓ Test passed: "${test.name}"`);
       } catch (error) {
         test.status = 'failed';
         test.error = error.message;
         test.stack = error.stack;
+        console.error(`[TestExecutor] ✗ Test failed: "${test.name}"`);
+        console.error(`[TestExecutor] Error: ${error.message}`);
+        console.error(`[TestExecutor] Stack:`, error.stack);
       }
       
       // Run all afterEach hooks (including from parents, in reverse order)

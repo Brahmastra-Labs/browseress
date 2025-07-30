@@ -114,6 +114,7 @@
     "test:integration": "mocha --require test/support/env --reporter spec --check-leaks test/integration.*.js",
     "test:e2e": "playwright test test/e2e/",
     "test:all": "npm run test:unit && npm run test:e2e",
+    "test:generate-manifest": "node scripts/generate-test-manifest.js",
     "test-ci": "nyc --exclude examples --exclude test --exclude benchmarks --reporter=lcovonly --reporter=text npm test",
     "test-cov": "nyc --exclude examples --exclude test --exclude benchmarks --reporter=html --reporter=text npm test",
     "test-tap": "mocha --require test/support/env --reporter tap --check-leaks test/ test/acceptance/",
