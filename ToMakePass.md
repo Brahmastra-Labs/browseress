@@ -45,7 +45,7 @@ Below is a detailed analysis of each Express test file, documenting dependencies
 
 ### Test Results Tracking (86 Total Tests)
 
-#### ✅ ANALYZED (5)
+#### ✅ ANALYZED (18)
 
 1. `express-test-harness-Expre-005e7--Test-Loading-res-format-js-chromium`
 ### `test/res.format.js`
@@ -132,23 +132,229 @@ Below is a detailed analysis of each Express test file, documenting dependencies
 
 ---
 
-### TO READ NEXT SEQUENTIALLY
-# 6
-
-#### 📋 TO READ (82)
 6. `express-test-harness-Expre-06db4-ding-req-acceptsCharsets-js-chromium`
+### `test/req.acceptsCharsets.js`
+* **Feature:** `req.acceptsCharsets()` - charset content negotiation
+* **Dependencies:**
+    * `[Module]`: `express` (main module)
+    * `[Module]`: `supertest` (HTTP testing)
+* **Current Status:** **Failing** 
+    * **Error:** All tests timing out
+    * Tests hang and never complete
+    * 3 tests, all failing with timeout
+* **Path to Green:**
+    * `[API Incompatibility]` Likely issue with response handling - tests use `res.end()` instead of `res.send()`
+    * `[Possible]` res.end() may not properly trigger response completion in browser environment
+    * Try changing to res.send() in tests or fix res.end() implementation
+
+---
+
 7. `express-test-harness-Expre-094dd-mic-Test-Loading-app-use-js-chromium`
+### `test/app.use.js`
+* **Feature:** `app.use()` middleware mounting and sub-app mounting
+* **Dependencies:**
+    * `[Module]`: `after` (npm package)
+    * `[Module]`: `node:assert` (assertions)
+    * `[Module]`: `express` (main module)
+    * `[Module]`: `supertest` (HTTP testing)
+* **Current Status:** **Partially Failing** 
+    * **Error:** Mixed failures - crypto issue and response duplication
+    * 15 of 27 tests passing
+    * 8 tests fail with `crypto.createHash is not a function`
+    * 3 tests timeout
+    * 1 test gets "blogblog" instead of "blog" (response duplication)
+* **Path to Green:**
+    * `[Missing Polyfill]` Primary issue is crypto dependency for ETags
+    * `[API Incompatibility]` Response body duplication in mounted apps
+    * Some timeouts may be related to sub-app mounting issues
+
+---
+
 8. `express-test-harness-Expre-10daf-mic-Test-Loading-res-get-js-chromium`
+### `test/res.get.js`
+* **Feature:** `res.get()` - get response header value
+* **Dependencies:**
+    * `[Module]`: `express` (main module)
+    * `[Module]`: `supertest` (HTTP testing)
+* **Current Status:** **Failing** 
+    * **Error:** `crypto.createHash is not a function`
+    * Single test failing due to crypto dependency
+* **Path to Green:**
+    * `[Missing Polyfill]` Same crypto issue - ETag generation requires createHash
+    * Once crypto is implemented, this test should pass
+
+---
+
 9. `express-test-harness-Expre-12394-mic-Test-Loading-app-all-js-chromium`
+### `test/app.all.js`
+* **Feature:** `app.all()` - register route handler for all HTTP methods
+* **Dependencies:**
+    * `[Module]`: `after` (npm package)
+    * `[Module]`: `express` (main module)
+    * `[Module]`: `supertest` (HTTP testing)
+* **Current Status:** **Failing** 
+    * **Error:** Two different issues
+    * First test: response body duplication - expects "PUT" but gets "PUTPUT"
+    * Second test: `request(...).del is not a function` - supertest API issue
+* **Path to Green:**
+    * `[API Incompatibility]` Response body duplication with res.end()
+    * `[Transform Error]` supertest's `.del()` method needs to be mapped to `.delete()`
+    * Both issues are fixable without crypto dependency
+
+---
+
 10. `express-test-harness-Expre-17688--Test-Loading-app-router-js-chromium`
+### `test/app.router.js`
+* **Feature:** Router functionality and HTTP method routing
+* **Dependencies:**
+    * `[Module]`: `after` (npm package)
+    * `[Module]`: `express` (main module)
+    * `[Module]`: `supertest` (HTTP testing)
+    * `[Module]`: `node:assert` (assertions)
+    * `[Module]`: `./support/utils` (test utilities)
+* **Current Status:** **Unknown/Mixed** 
+    * Test loads successfully with 66 tests found
+    * All transformations appear successful
+    * Need full error output to determine specific failures
+* **Path to Green:**
+    * `[Unknown]` Tests may be failing due to crypto issues (common pattern)
+    * `[Possible]` Router parameter handling may have issues
+    * Need to see actual test execution results
+
+---
+
 11. `express-test-harness-Expre-18149-c-Test-Loading-req-query-js-chromium`
+### `test/req.query.js`
+* **Feature:** `req.query` - query string parsing functionality
+* **Dependencies:**
+    * `[Module]`: `node:assert` (assertions)
+    * `[Module]`: `express` (main module)
+* **Current Status:** **Mostly Failing** 
+    * **Error:** `crypto.createHash is not a function`
+    * 1 of 9 tests passing (only the error throwing test)
+    * 8 tests fail due to crypto dependency
+* **Path to Green:**
+    * `[Missing Polyfill]` Same crypto issue - ETag generation in responses
+    * Once crypto is implemented, all query parsing tests should pass
+
+---
+
 12. `express-test-harness-Expre-188bb-est-Loading-res-download-js-chromium`
+### `test/res.download.js`
+* **Feature:** `res.download()` - file download functionality
+* **Dependencies:**
+    * `[Global]`: `__dirname` (file path resolution)
+    * File system operations
+* **Current Status:** **NOT_APPLICABLE** 
+    * Uses `__dirname` which triggers compatibility check
+    * 25 tests found but marked as incompatible
+* **Path to Green:**
+    * `[Transform]` Provide `__dirname` polyfill
+    * `[Challenge]` File download tests heavily depend on file system
+    * May need significant adaptation for OPFS-based file operations
+
+---
+
 13. `express-test-harness-Expre-1b433-Test-Loading-express-raw-js-chromium`
+### `test/express.raw.js`
+* **Feature:** `express.raw()` middleware for parsing raw body
+* **Dependencies:**
+    * `[Module]`: `node:assert` (assertions)
+    * `[Module]`: `node:async_hooks` (async context tracking)
+    * `[Module]`: `express` (main module)
+    * `[Module]`: `supertest` (HTTP testing)
+* **Current Status:** **Failing** 
+    * **Error:** `ERROR: Unhandled requires: node:async_hooks`
+    * Tests cannot run - async_hooks module not transformed
+    * Shows "0 passed, 0 failed" - no tests executed
+* **Path to Green:**
+    * `[Missing Polyfill]` Same as express.json.js - needs async-hooks-stub.js
+    * `[Transform]` Add node:async_hooks mapping
+
+---
+
 14. `express-test-harness-Expre-1ec6c-est-Loading-res-location-js-chromium`
+### `test/res.location.js`
+* **Feature:** `res.location()` - set Location response header
+* **Dependencies:**
+    * `[Module]`: `express` (main module)
+    * `[Module]`: `node:url` (URL parsing)
+* **Current Status:** **Failing** 
+    * **Error:** `ERROR: Unhandled requires: node:url`
+    * Tests cannot run - url module not transformed
+    * Shows "0 passed, 0 failed" - no tests executed
+* **Path to Green:**
+    * `[Missing Polyfill]` Create `url-stub.js` with URL parsing functionality
+    * `[Transform]` Add node:url mapping in test-transformer.js
+
+---
+
 15. `express-test-harness-Expre-22c32-est-Loading-req-protocol-js-chromium`
+### `test/req.protocol.js`
+* **Feature:** `req.protocol` - get request protocol (http/https)
+* **Dependencies:**
+    * `[Module]`: `express` (main module)
+* **Current Status:** **Unknown** 
+    * Test loads successfully with 7 tests found
+    * Error context appears truncated - no test results shown
+* **Path to Green:**
+    * `[Unknown]` Need to see actual test execution results
+    * Likely crypto issue based on pattern of other req.* tests
+
+---
+
 16. `express-test-harness-Expre-2344c-oading-req-signedCookies-js-chromium`
+### `test/req.signedCookies.js`
+* **Feature:** `req.signedCookies` - signed cookie parsing
+* **Dependencies:**
+    * `[Module]`: `express` (main module)
+    * `[Module]`: `cookie-parser` (npm package for cookie parsing)
+* **Current Status:** **Failing** 
+    * **Error:** `ERROR: Unhandled requires: cookie-parser`
+    * Tests cannot run - cookie-parser module not transformed
+    * Shows "0 passed, 0 failed" - no tests executed
+* **Path to Green:**
+    * `[Transform Error]` Add cookie-parser mapping in test-transformer.js
+    * `[Alternative]` Mock cookie-parser functionality for tests
+
+---
+
 17. `express-test-harness-Expre-28ee8-t-Loading-acceptance-mvc-js-chromium`
+### `test/acceptance/mvc.js`
+* **Feature:** MVC pattern example test
+* **Dependencies:**
+    * `[Module]`: `supertest` (HTTP testing)
+    * `[Module]`: `../../examples/mvc` (example app)
+* **Current Status:** **Failing** 
+    * **Error:** `ERROR: Unhandled requires: ../../examples/mvc`
+    * Tests cannot run - example app require not transformed
+    * Shows "0 passed, 0 failed" - no tests executed
+* **Path to Green:**
+    * `[Transform Error]` Same as cookie-sessions - add example app mapping
+    * `[Alternative]` Mock the MVC example app inline
+
+---
+
 18. `express-test-harness-Expre-2ab76--Test-Loading-app-locals-js-chromium`
+### `test/app.locals.js`
+* **Feature:** `app.locals` - application-level variables
+* **Dependencies:**
+    * `[Module]`: `node:assert` (assertions)
+    * `[Module]`: `express` (main module)
+* **Current Status:** **Passing** ✅
+    * All 2 tests passing successfully
+    * No errors
+* **Path to Green:**
+    * Already green! No fixes needed
+
+---
+
+### TO READ NEXT SEQUENTIALLY
+# 19
+# DO NOT SPEED UP BY TRYING TO HANDLE MULTIPLE. DO ONE AT A TIME.
+# CONTINUE
+
+#### 📋 TO READ (69)
 19. `express-test-harness-Expre-2e7bc--Loading-acceptance-auth-js-chromium`
 20. `express-test-harness-Expre-36a31-mic-Test-Loading-req-get-js-chromium`
 21. `express-test-harness-Expre-36e50-t-Loading-acceptance-ejs-js-chromium`
