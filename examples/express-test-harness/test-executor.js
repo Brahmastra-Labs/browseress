@@ -17,45 +17,120 @@ class TestExecutor {
   async executeTest(transformedCode, testContext) {
     try {
       console.log('[TestExecutor] Preparing to execute test');
-      console.log('[TestExecutor] Code type:', typeof transformedCode);
-      console.log('[TestExecutor] Code preview:', transformedCode.substring(0, 200) + '...');
-      console.log('[TestExecutor] Test context keys:', Object.keys(testContext));
-      
-      // Create the test function
-      // The transformed code is already a function string, so we evaluate it directly
-      const testFunction = eval(transformedCode);
-      console.log('[TestExecutor] Test function created, type:', typeof testFunction);
       
       // Create execution context with all necessary utilities
       const context = this.createTestContext(testContext);
       
-      // Execute with timeout
-      const result = await this.runWithTimeout(
-        () => testFunction(context),
-        this.timeout
-      );
+      // Store context globally so the script can access it
+      window._testExecutorContext = context;
       
-      // Process results
-      if (result.success) {
-        console.log('[TestExecutor] Test function executed successfully');
-        console.log('[TestExecutor] Collected describes:', context._describes.length);
-        console.log('[TestExecutor] Collected root tests:', context._tests.length);
+      // Create a promise to track script execution
+      return new Promise((resolve, reject) => {
+        // Wrap the test code to call back when done
+        const wrappedCode = `
+          try {
+            const context = window._testExecutorContext;
+            const testFunction = ${transformedCode};
+            
+            // Execute the test function
+            const result = testFunction(context);
+            
+            // Store the result globally
+            window._testExecutorResult = {
+              success: true,
+              context: context,
+              functionResult: result
+            };
+          } catch (error) {
+            window._testExecutorResult = {
+              success: false,
+              error: error.message,
+              stack: error.stack
+            };
+          }
+          
+          // Dispatch event to signal completion
+          window.dispatchEvent(new CustomEvent('testExecutorComplete'));
+        `;
         
-        // Wait for any pending tests to complete
-        await this.waitForTestCompletion(context);
+        // Set up completion handler
+        let handleComplete = async () => {
+          window.removeEventListener('testExecutorComplete', handleComplete);
+          
+          // Clean up the script element
+          if (script.parentNode) {
+            script.parentNode.removeChild(script);
+          }
+          URL.revokeObjectURL(scriptUrl);
+          
+          const result = window._testExecutorResult;
+          delete window._testExecutorResult;
+          delete window._testExecutorContext;
+          
+          if (!result) {
+            reject(new Error('Test execution failed - no result'));
+            return;
+          }
+          
+          if (result.success) {
+            console.log('[TestExecutor] Test function executed successfully');
+            console.log('[TestExecutor] Collected describes:', result.context._describes.length);
+            console.log('[TestExecutor] Collected root tests:', result.context._tests.length);
+            
+            // Wait for any pending tests to complete
+            await this.waitForTestCompletion(result.context);
+            
+            resolve({
+              success: true,
+              results: this.collectTestResults(result.context),
+              stats: this.getTestStats(result.context)
+            });
+          } else {
+            resolve({
+              success: false,
+              error: result.error,
+              stack: result.stack
+            });
+          }
+        };
         
-        return {
-          success: true,
-          results: this.collectTestResults(context),
-          stats: this.getTestStats(context)
+        window.addEventListener('testExecutorComplete', handleComplete);
+        
+        // Create a Blob from the code
+        const blob = new Blob([wrappedCode], { type: 'application/javascript' });
+        const scriptUrl = URL.createObjectURL(blob);
+        
+        // Create and inject the script
+        const script = document.createElement('script');
+        script.src = scriptUrl;
+        
+        // Handle script loading errors
+        script.onerror = (error) => {
+          window.removeEventListener('testExecutorComplete', handleComplete);
+          URL.revokeObjectURL(scriptUrl);
+          reject(new Error('Failed to load test script'));
         };
-      } else {
-        return {
-          success: false,
-          error: result.error,
-          stack: result.stack
+        
+        // Add timeout handling
+        const timeoutId = setTimeout(() => {
+          window.removeEventListener('testExecutorComplete', handleComplete);
+          if (script.parentNode) {
+            script.parentNode.removeChild(script);
+          }
+          URL.revokeObjectURL(scriptUrl);
+          reject(new Error('Test execution timeout'));
+        }, this.timeout);
+        
+        // Override handleComplete to clear timeout
+        const originalHandleComplete = handleComplete;
+        handleComplete = async () => {
+          clearTimeout(timeoutId);
+          await originalHandleComplete.call(this);
         };
-      }
+        
+        // Inject the script into the document
+        document.head.appendChild(script);
+      });
       
     } catch (error) {
       console.error('[TestExecutor] Execution error:', error);
@@ -172,6 +247,8 @@ class TestExecutor {
       // Utility functions
       after: window.after || userContext.after,
       testUtils: window.testUtils || userContext.testUtils,
+      
+      // Note: process is NOT in context - it's a global like in Node.js
       
       // Store test execution data
       _tests: tests,
@@ -404,6 +481,7 @@ class TestExecutor {
         }, 5000); // 5 second timeout for individual tests
         
         try {
+          
           // Call function with done callback
           const result = fn(done);
           

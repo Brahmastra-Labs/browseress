@@ -55,8 +55,8 @@ describe('polyfills', function(){
     })
 
     describe('.env', function(){
-      it('should be an empty object', function(){
-        assert.deepStrictEqual(process.env, {})
+      it('should have NODE_ENV set to development by default', function(){
+        assert.deepStrictEqual(process.env, { NODE_ENV: 'development' })
       })
 
       it('should be mutable', function(){
@@ -69,7 +69,7 @@ describe('polyfills', function(){
 
     describe('.version', function(){
       it('should be a version string', function(){
-        assert.strictEqual(process.version, 'v1.0.0')
+        assert.strictEqual(process.version, 'v16.0.0')
       })
     })
   })

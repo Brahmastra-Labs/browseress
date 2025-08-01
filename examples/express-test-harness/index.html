@@ -191,6 +191,9 @@
         const express = window.browseress.express;
         const WebSocketTransport = window.browseress.WebSocketTransport;
         
+        // Make Express utils available globally for tests
+        window.expressUtils = window.browseress.expressUtils;
+        
         // Create transport and connect
         transport = new WebSocketTransport('ws://localhost:3001');
         
@@ -714,13 +717,18 @@
         // Make request function available globally for the test
         window.supertest = request;
         
-        // Check dependencies
-        console.log('[Test] Checking dependencies...');
-        console.log('[Test] window.assert:', window.assert);
-        console.log('[Test] window.browseress:', window.browseress);
-        console.log('[Test] window.browseress.express:', window.browseress?.express);
-        console.log('[Test] window.after:', window.after);
-        console.log('[Test] window.testUtils:', window.testUtils);
+        // Make process available globally like in Node.js
+        if (!window.process && window.browseress?.process) {
+          window.process = window.browseress.process;
+          // Also make it available as just 'process' for compatibility
+          globalThis.process = window.process;
+          console.log('[Test] Set window.process and global process from browseress.process');
+        } else {
+          console.log('[Test] window.process already exists or browseress.process not available');
+          console.log('[Test] window.process:', window.process);
+          console.log('[Test] window.browseress?.process:', window.browseress?.process);
+        }
+        
         
         // Create test context
         const testContext = {
@@ -737,12 +745,10 @@
           transport,
           after: window.after,
           testUtils: window.testUtils
+          // Note: process is NOT in context - it's a global like in Node.js
         };
         
         // Execute the test using TestExecutor
-        console.log('[Test] Using TestExecutor to run tests...');
-        console.log('[Test] Test code length:', currentTestCode.length);
-        console.log('[Test] Test code preview:', currentTestCode.substring(0, 200));
         const startTime = Date.now();
         
         const executionResult = await testExecutor.executeTest(currentTestCode, testContext);

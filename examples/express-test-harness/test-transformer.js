@@ -259,6 +259,10 @@ class TestTransformer {
    * Wrap test code in an executable function
    */
   wrapTestCode(code, metadata) {
+    // Since we're using dynamic script injection instead of eval,
+    // the code will execute in the true global scope where window.process
+    // is available as just 'process'
+    
     // Create a function that can be executed with proper context
     const wrapped = `
 (function(context) {
