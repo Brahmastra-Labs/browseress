@@ -37,30 +37,27 @@ module.exports = {
   },
   resolve: {
     alias: {
-      // Replace Express's view.js with our browser-compatible version
-      './view': path.resolve(__dirname, 'lib/polyfills/view-browser.js'),
-      // Replace parseurl with our polyfill
-      'parseurl': path.resolve(__dirname, 'lib/polyfills/parseurl-stub.js')
+      './view': path.resolve(__dirname, 'lib/polyfills/view-browser.js')
     },
     fallback: {
-      // Node.js polyfills for browser
-      'events': path.resolve(__dirname, 'lib/polyfills/events.js'),
-      'node:events': path.resolve(__dirname, 'lib/polyfills/events.js'),
-      'buffer': require.resolve('buffer/'),
+      'events': require.resolve('events'),
+      'node:events': require.resolve('events'),
+      'buffer': require.resolve('buffer'),
       'path': path.resolve(__dirname, 'lib/polyfills/path.js'),
       'http': path.resolve(__dirname, 'lib/polyfills/http-stub.js'),
       'net': path.resolve(__dirname, 'lib/polyfills/net-stub.js'),
       'fs': path.resolve(__dirname, 'lib/polyfills/fs-opfs-adapter.js'),
       'crypto': path.resolve(__dirname, 'lib/polyfills/crypto-stub.js'),
       'string_decoder': false,
-      'url': path.resolve(__dirname, 'lib/polyfills/url-stub.js'),
-      'parseurl': path.resolve(__dirname, 'lib/polyfills/parseurl-stub.js'),
-      'querystring': path.resolve(__dirname, 'lib/polyfills/querystring-stub.js'),
+      'url': require.resolve('url'),
+      'parseurl': require.resolve('parseurl'),
+      'querystring': require.resolve('qs'),
       'qs': require.resolve('qs'),
-      'zlib': false,
+      'zlib': path.resolve(__dirname, 'lib/polyfills/zlib-stub.js'),
+      'node:zlib': path.resolve(__dirname, 'lib/polyfills/zlib-stub.js'),
       'stream': path.resolve(__dirname, 'lib/polyfills/stream-stub.js'),
-      'util': path.resolve(__dirname, 'lib/polyfills/util-stub.js'),
-      'async_hooks': false
+      'util': require.resolve('util/'),
+      'async_hooks': path.resolve(__dirname, 'lib/polyfills/async-hooks-stub.js')
     }
   },
   target: 'web',
@@ -89,22 +86,22 @@ module.exports = {
             resource.request = path.resolve(__dirname, 'lib/polyfills/fs-opfs-adapter.js');
             break;
           case 'events':
-            resource.request = path.resolve(__dirname, 'lib/polyfills/events.js');
+            resource.request = require.resolve('events');
             break;
           case 'node:events':
-            resource.request = path.resolve(__dirname, 'lib/polyfills/events.js');
+            resource.request = require.resolve('events');
             break;
           case 'buffer':
             resource.request = 'buffer';
             break;
           case 'querystring':
-            resource.request = path.resolve(__dirname, 'lib/polyfills/querystring-stub.js');
+            resource.request = require.resolve('qs');
             break;
           case 'zlib':
             resource.request = path.resolve(__dirname, 'lib/polyfills/zlib-stub.js');
             break;
           case 'util':
-            resource.request = path.resolve(__dirname, 'lib/polyfills/util-stub.js');
+            resource.request = require.resolve('util');
             break;
           case 'stream':
             resource.request = path.resolve(__dirname, 'lib/polyfills/stream-stub.js');
@@ -113,9 +110,11 @@ module.exports = {
             resource.request = path.resolve(__dirname, 'lib/polyfills/crypto-stub.js');
             break;
           case 'url':
-            resource.request = path.resolve(__dirname, 'lib/polyfills/url-stub.js');
+            resource.request = require.resolve('url');
             break;
           case 'async_hooks':
+            resource.request = path.resolve(__dirname, 'lib/polyfills/async-hooks-stub.js');
+            break;
           case 'string_decoder':
             return false; // Ignore these modules
           default:

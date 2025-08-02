@@ -851,13 +851,34 @@
         // Make request function available globally for the test
         window.supertest = request;
         
-        // Make expect available globally for transformed tests (earlier)
+        // Make expect available globally for transformed tests
         window.expect = expect;
         
-        // Create a simple assert function for compatibility
+        // Create assert function for compatibility
         window.assert = function(condition, message) {
           if (!condition) {
             throw new Error(message || 'Assertion failed');
+          }
+        };
+        
+        // Add throws method to assert
+        window.assert.throws = function(fn, expectedError) {
+          let threw = false;
+          let actualError;
+          try {
+            fn();
+          } catch (err) {
+            threw = true;
+            actualError = err;
+          }
+          if (!threw) {
+            throw new Error('Expected function to throw');
+          }
+          if (expectedError && typeof expectedError === 'string' && actualError.message !== expectedError) {
+            throw new Error(`Expected error "${expectedError}" but got "${actualError.message}"`);
+          }
+          if (expectedError && typeof expectedError === 'function' && !(actualError instanceof expectedError)) {
+            throw new Error(`Expected error to be instance of ${expectedError.name} but got ${actualError.constructor.name}`);
           }
         };
         
@@ -867,15 +888,7 @@
           // Also make it available as just 'process' for compatibility
           globalThis.process = window.process;
           console.log('[Test] Set window.process and global process from browseress.process');
-        } else {
-          console.log('[Test] window.process already exists or browseress.process not available');
-          console.log('[Test] window.process:', window.process);
-          console.log('[Test] window.browseress?.process:', window.browseress?.process);
         }
-        
-        
-        // Make expect available globally for transformed tests
-        window.expect = expect;
         
         // Create test context
         const testContext = {
@@ -970,6 +983,9 @@
         } else {
           log('\n❌ Some tests failed', 'fail');
         }
+        
+        // Store detailed results for playwright to access
+        window._lastTestResults = results;
         
         // Resolve the promise with the final results
         resolve(testResults);

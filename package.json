@@ -112,7 +112,7 @@
     "test:harness": "playwright test test/harness/simple-test-runner.spec.js",
     "test:unit": "mocha --exclude 'test/harness/**' --exclude 'test/e2e/**'",
     "test:integration": "mocha --require test/support/env --reporter spec --check-leaks test/integration.*.js",
-    "test:e2e": "playwright test test/e2e/",
+    "test:e2e": "rm -f temp-test-results.json && playwright test test/e2e/",
     "test:e2ecustom": "playwright test test/e2e/ --grep-invert='Express Test Harness'",
     "test:all": "npm run test:unit && npm run test:e2e",
     "test:generate-manifest": "node scripts/generate-test-manifest.js",

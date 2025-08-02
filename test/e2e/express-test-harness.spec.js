@@ -2,6 +2,8 @@ const { test, expect } = require('@playwright/test');
 const fs = require('fs');
 const path = require('path');
 
+const resultsFile = path.join(__dirname, '../../temp-test-results.json');
+
 test.describe('Express Test Harness - Dynamic Test Loading', () => {
   let page;
   
@@ -58,6 +60,8 @@ test.describe('Express Test Harness - Dynamic Test Loading', () => {
       await page.close();
     }
   });
+
+  let allTestResults = [];
 
   // Load test manifest to get all testable files
   const manifestPath = path.join(__dirname, '../../examples/express-test-harness/test-manifest.json');
@@ -156,26 +160,95 @@ test.describe('Express Test Harness - Dynamic Test Loading', () => {
         return window._testCompletionPromise;
       });
       
-      // NOW it is safe to proceed with assertions, because the code
-      // will only reach here after the promise has resolved.
       clearTimeout(timeoutId);
       console.log('On-page test suite finished with result:', finalResults);
       
-      // Verify test results from promise
-      expect(finalResults).toBeDefined();
-      expect(finalResults.error).toBeUndefined();
-      expect(finalResults.passed).toBeGreaterThanOrEqual(0);
-      expect(finalResults.failed).toBeGreaterThanOrEqual(0);
+
+      const safeFinalResults = finalResults || { passed: 0, failed: 0, error: 'Test execution failed - no result' };
       
-      const totalTests = finalResults.passed + finalResults.failed;
-      expect(totalTests).toBeGreaterThan(0);
+      // Handle test counts - negative failed count indicates execution error
+      const normalizedPassed = Math.max(0, safeFinalResults.passed || 0);
+      const rawFailed = safeFinalResults.failed || 0;
+      const hasExecutionError = rawFailed < 0 || !!safeFinalResults.error;
+      const normalizedFailed = Math.max(0, rawFailed); // Only for display/storage
+      const totalTests = normalizedPassed + normalizedFailed;
+      const passRate = totalTests > 0 ? Math.round((normalizedPassed / totalTests) * 100) : 0;
+      console.log(`${suite.name}: ${safeFinalResults.passed || 0}/${totalTests} tests passed (${passRate}%)`);
       
-      const passRate = Math.round((finalResults.passed / totalTests) * 100);
-      console.log(`${suite.name}: ${finalResults.passed}/${totalTests} tests passed (${passRate}%)`);
+      // Extract and display detailed test results from the browser
+      const detailedResults = await page.evaluate(() => {
+        const currentResults = window._lastTestResults || [];
+        // Clear the results immediately to prevent cross-contamination
+        window._lastTestResults = [];
+        return currentResults;
+      });
+      // Ensure we have clean data for this specific test suite
+      const suiteResult = {
+        suiteName: suite.name,
+        passed: normalizedPassed,
+        failed: normalizedFailed,
+        total: totalTests,
+        passRate: passRate,
+        details: detailedResults && detailedResults.length > 0 ? detailedResults : [],
+        hasError: !!safeFinalResults.error,
+        errorMsg: safeFinalResults.error || null
+      };
       
-      // Fail the test if pass rate is too low
-      if (passRate < 50) {
-        throw new Error(`Low pass rate: only ${finalResults.passed}/${totalTests} tests passed (${passRate}%)`);
+      // Validate that the detailed results actually match this test suite
+      if (detailedResults && detailedResults.length > 0) {
+        console.log(`[DEBUG] ${suite.name} has ${detailedResults.length} detailed results:`, 
+                   detailedResults.map(r => r.name || 'unnamed').slice(0, 3));
+      } else {
+        console.log(`[DEBUG] ${suite.name} has no detailed results (this may be normal for failed tests)`);
+      }
+      
+      allTestResults.push(suiteResult);
+      
+      // Store results in Node.js filesystem (not browser OPFS)
+      try {
+        let allResults = [];
+        if (fs.existsSync(resultsFile)) {
+          const data = fs.readFileSync(resultsFile, 'utf8');
+          allResults = JSON.parse(data);
+        }
+        
+        allResults.push(suiteResult);
+        fs.writeFileSync(resultsFile, JSON.stringify(allResults, null, 2));
+        
+        console.log(`[Node.js] Stored result for ${suite.name}, total results: ${allResults.length}`);
+      } catch (error) {
+        console.error('[Node.js] Failed to store test result:', error);
+      }
+
+      // Display detailed per-test results immediately
+      if (detailedResults && detailedResults.length > 0) {
+        console.log(`\n📋 DETAILED RESULTS FOR ${suite.name}:`);
+        
+        detailedResults.forEach((result, index) => {
+          const testName = result.name || `Test ${index + 1}`;
+          if (result.status === 'passed') {
+            console.log(`  ✅ ${testName}`);
+          } else if (result.status === 'failed') {
+            const errorMsg = result.error ? result.error.split('\n')[0] : 'Unknown error';
+            console.log(`  ❌ ${testName}`);
+            console.log(`     └─ Error: ${errorMsg}`);
+          }
+        });
+      }
+      
+      // FAIL if: any tests failed, execution error, OR no tests ran at all
+      if (normalizedFailed > 0 || hasExecutionError || totalTests === 0) {
+        let errorReason;
+        if (hasExecutionError) {
+          errorReason = `Execution error: ${safeFinalResults.error}`;
+        } else if (totalTests === 0) {
+          errorReason = `No tests executed - likely transformation or loading error`;
+        } else {
+          errorReason = `${normalizedFailed} test(s) failed out of ${totalTests} total`;
+        }
+        throw new Error(`❌ FAILED: ${errorReason}. We need 100% pass rate and successful test execution.`);
+      } else {
+        console.log(`✅ SUCCESS: All ${normalizedPassed} tests passed (${passRate}%)`);
       }
       
       // Note: Output verification removed as it's not relevant for Express tests
@@ -247,4 +320,105 @@ test.describe('Express Test Harness - Dynamic Test Loading', () => {
     // All our current tests should be ADAPTED since we transform requires
     expect(stats.categories['ADAPTED']).toBe(testSuites.length);
   });
+
+  // Final test that runs LAST and shows comprehensive results
+  test('FINAL RESULTS SUMMARY', async () => {
+    console.log('\n\n' + '='.repeat(80));
+    console.log('🎯 FINAL COMPREHENSIVE TEST RESULTS SUMMARY');
+    console.log('='.repeat(80));
+    
+    // Get results from Node.js filesystem
+    let allResults = [];
+    try {
+      if (fs.existsSync(resultsFile)) {
+        const data = fs.readFileSync(resultsFile, 'utf8');
+        allResults = JSON.parse(data);
+        console.log(`[Node.js] Read ${allResults.length} results from filesystem`);
+      }
+    } catch (error) {
+      console.error('[Node.js] Failed to read test results:', error);
+    }
+    
+    console.log(`\n✅ COLLECTED RESULTS: Found ${allResults.length} test suites`);
+    
+    if (allResults.length === 0) {
+      console.log('❌ No test results were collected during this run.');
+      console.log('   This indicates the collection mechanism isn\'t working.');
+      console.log('='.repeat(80) + '\n');
+      // Don't fail the test, just report the issue
+      return;
+    }
+
+    let totalPassed = 0;
+    let totalFailed = 0;
+    let totalTests = 0;
+    let failedSuites = [];
+    let passedSuites = [];
+
+    // Calculate totals and categorize suites
+    allResults.forEach(suite => {
+      totalPassed += suite.passed;
+      totalFailed += suite.failed;
+      totalTests += suite.total;
+      
+      if (suite.failed > 0) {
+        failedSuites.push(suite);
+      } else if (suite.total > 0) {
+        passedSuites.push(suite);
+      }
+    });
+
+    const overallPassRate = totalTests > 0 ? Math.round((totalPassed / totalTests) * 100) : 0;
+    
+    // Overall summary
+    console.log(`\n📊 OVERALL STATISTICS:`);
+    console.log(`   Test Suites Analyzed: ${allResults.length}`);
+    console.log(`   Total Individual Tests: ${totalTests}`);
+    console.log(`   ✅ Tests Passed: ${totalPassed} (${overallPassRate}%)`);
+    console.log(`   ❌ Tests Failed: ${totalFailed}`);
+    console.log(`   📂 Suites Passing: ${passedSuites.length}`);
+    console.log(`   💥 Suites Failing: ${failedSuites.length}`);
+
+    // Show ALL test results like you wanted
+    console.log(`\n📋 ALL TEST RESULTS:`);
+    allResults.forEach(suite => {
+      if (suite.total === 0 && !suite.hasError) return; // Skip empty suites without errors
+      
+      console.log(`\n📂 ${suite.suiteName}: ${suite.passed}/${suite.total} tests (${suite.passRate}%)`);
+      
+      if (suite.hasError) {
+        console.log(`  💥 Execution Error: ${suite.errorMsg}`);
+      } else if (suite.details && suite.details.length > 0) {
+        // Show the detailed results we collected
+        suite.details.forEach((test, index) => {
+          const testName = test.name || `Test ${index + 1}`;
+          if (test.status === 'passed') {
+            console.log(`  ✅ ${testName}`);
+          } else if (test.status === 'failed') {
+            const errorMsg = test.error ? test.error.split('\n')[0] : 'Unknown error';
+            console.log(`  ❌ ${testName}`);
+            console.log(`     └─ Error: ${errorMsg}`);
+          }
+        });
+      } else {
+        // Fallback if no detailed results
+        console.log(`  (${suite.passed} passed, ${suite.failed} failed)`);
+      }
+    });
+
+    console.log('\n' + '='.repeat(80));
+    if (totalFailed === 0 && totalTests > 0) {
+      console.log('🎉 CONGRATULATIONS! ALL TESTS PASSED!');
+    } else if (totalTests === 0) {
+      console.log('⚠️  NO EXECUTABLE TESTS FOUND');
+    } else {
+      console.log(`⚠️  SUMMARY: ${totalFailed} tests failed across ${failedSuites.length} suites`);
+      console.log(`   Focus areas: ${failedSuites.map(s => s.suiteName).join(', ')}`);
+    }
+    console.log('='.repeat(80) + '\n');
+    
+    // Always pass this test - it's just for reporting
+    expect(true).toBe(true);
+  });
+
 });
