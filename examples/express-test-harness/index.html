@@ -482,7 +482,7 @@
                 ...this.headers
               },
               body: this.body,
-              query: {},
+              // Don't set query - Express will compute it from the URL using its getter
               params: {},
               // Required by Express
               httpVersion: '1.1',
@@ -516,15 +516,9 @@
             
             // Override methods to capture data
             mockRes.end = function(data) {
-              if (data) {
-                // Only set responseData if nothing has been written yet
-                if (!responseData) {
-                  responseData = data;
-                } else {
-                  // Append to existing data
-                  responseData += data;
-                }
-              }
+              // The data passed to end() is already handled by write()
+              // because the base ServerResponse.end() calls write() internally
+              // So we don't need to capture it again here
               responseStatus = this.statusCode;
               responseHeaders = this.headers;
               // Call original end to emit events
@@ -534,7 +528,9 @@
             // Override write to capture data
             const originalWrite = mockRes.write;
             mockRes.write = function(chunk) {
-              responseData += chunk;
+              if (chunk) {
+                responseData += chunk;
+              }
               return originalWrite.call(this, chunk);
             };
             

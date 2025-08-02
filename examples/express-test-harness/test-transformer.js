@@ -98,7 +98,12 @@ class TestTransformer {
       'assert': 'window.assert',
       'after': 'window.after',
       './support/utils': 'window.testUtils',
-      '../lib/utils': 'window.expressUtils'  // Express internal utils - separate from test utils
+      '../lib/utils': 'window.expressUtils',  // Express internal utils - separate from test utils
+      'crypto': 'window.browseress.crypto',
+      'node:crypto': 'window.browseress.crypto',
+      'url': 'window.browseress.url',
+      'node:url': 'window.browseress.url',
+      'parseurl': 'window.browseress.parseurl'
     };
 
     // Transform require statements

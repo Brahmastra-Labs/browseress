@@ -113,6 +113,7 @@
     "test:unit": "mocha --exclude 'test/harness/**' --exclude 'test/e2e/**'",
     "test:integration": "mocha --require test/support/env --reporter spec --check-leaks test/integration.*.js",
     "test:e2e": "playwright test test/e2e/",
+    "test:e2ecustom": "playwright test test/e2e/ --grep-invert='Express Test Harness'",
     "test:all": "npm run test:unit && npm run test:e2e",
     "test:generate-manifest": "node scripts/generate-test-manifest.js",
     "test-ci": "nyc --exclude examples --exclude test --exclude benchmarks --reporter=lcovonly --reporter=text npm test",
