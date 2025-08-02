@@ -491,10 +491,8 @@
               connection: {
                 remoteAddress: '127.0.0.1'
               },
-              // Method to get headers
-              get(header) {
-                return this.headers[header.toLowerCase()];
-              },
+              // Don't override get() - let Express add its own implementation
+              // via the prototype chain for proper validation
               // Stream-like methods Express might expect
               on() { return this; },
               once() { return this; },
