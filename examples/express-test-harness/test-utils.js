@@ -28,66 +28,8 @@
     };
   }
 
-  /**
-   * Simple assert implementation that mimics Node.js assert
-   */
-  const assert = function(value, message) {
-    if (!value) {
-      throw new Error(message || 'Assertion failed');
-    }
-  };
-
-  assert.strictEqual = function(actual, expected, message) {
-    if (actual !== expected) {
-      throw new Error(message || `Expected ${expected} but got ${actual}`);
-    }
-  };
-
-  assert.equal = function(actual, expected, message) {
-    if (actual != expected) {
-      throw new Error(message || `Expected ${expected} but got ${actual}`);
-    }
-  };
-
-  assert.deepEqual = function(actual, expected, message) {
-    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-      throw new Error(message || `Expected ${JSON.stringify(expected)} but got ${JSON.stringify(actual)}`);
-    }
-  };
-
-  assert.ok = function(value, message) {
-    if (!value) {
-      throw new Error(message || 'Expected truthy value');
-    }
-  };
-
-  assert.fail = function(message) {
-    throw new Error(message || 'Failed');
-  };
-
-  assert.throws = function(fn, expected, message) {
-    let threw = false;
-    let error;
-    
-    try {
-      fn();
-    } catch (e) {
-      threw = true;
-      error = e;
-    }
-    
-    if (!threw) {
-      throw new Error(message || 'Expected function to throw');
-    }
-    
-    if (expected) {
-      if (expected instanceof RegExp && !expected.test(error.message)) {
-        throw new Error(message || `Expected error message to match ${expected}`);
-      } else if (typeof expected === 'function' && !(error instanceof expected)) {
-        throw new Error(message || `Expected error to be instance of ${expected.name}`);
-      }
-    }
-  };
+  // Note: assert module is provided by webpack bundle in index.html
+  // We don't define a custom assert here to avoid conflicts
 
   /**
    * Utility for checking if a value should be skipped in query tests
@@ -243,7 +185,7 @@
 
   // Export utilities to window
   window.after = after;
-  window.assert = assert;
+  // Note: window.assert is set by webpack bundle in index.html
   window.testUtils = testUtils;
   
   // Make Buffer globally available since many modules expect it
@@ -252,7 +194,7 @@
   // Also export as a module-like object
   window.testUtilities = {
     after,
-    assert,
+    // Note: assert provided by webpack bundle
     testUtils,
     Buffer,
     methods,

@@ -34,6 +34,7 @@
   ],
   "dependencies": {
     "accepts": "^2.0.0",
+    "assert": "^2.1.0",
     "body-parser": "^2.2.0",
     "content-disposition": "^1.0.0",
     "content-type": "^1.0.5",
@@ -60,6 +61,8 @@
     "serve-static": "^2.2.0",
     "statuses": "^2.0.1",
     "type-is": "^2.0.1",
+    "url": "^0.11.4",
+    "util": "^0.12.5",
     "vary": "^1.1.2"
   },
   "devDependencies": {

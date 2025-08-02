@@ -12,7 +12,7 @@ module.exports = {
     filename: '[name].bundle.js',
     path: path.resolve(__dirname, 'dist'),
     library: {
-      name: '[name]',
+      name: 'browseress',
       type: 'umd'
     },
     globalObject: 'this'
@@ -57,7 +57,8 @@ module.exports = {
       'node:zlib': path.resolve(__dirname, 'lib/polyfills/zlib-stub.js'),
       'stream': path.resolve(__dirname, 'lib/polyfills/stream-stub.js'),
       'util': require.resolve('util/'),
-      'async_hooks': path.resolve(__dirname, 'lib/polyfills/async-hooks-stub.js')
+      'async_hooks': path.resolve(__dirname, 'lib/polyfills/async-hooks-stub.js'),
+      'assert': require.resolve('assert')
     }
   },
   target: 'web',

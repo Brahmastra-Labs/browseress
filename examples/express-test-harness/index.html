@@ -854,33 +854,8 @@
         // Make expect available globally for transformed tests
         window.expect = expect;
         
-        // Create assert function for compatibility
-        window.assert = function(condition, message) {
-          if (!condition) {
-            throw new Error(message || 'Assertion failed');
-          }
-        };
-        
-        // Add throws method to assert
-        window.assert.throws = function(fn, expectedError) {
-          let threw = false;
-          let actualError;
-          try {
-            fn();
-          } catch (err) {
-            threw = true;
-            actualError = err;
-          }
-          if (!threw) {
-            throw new Error('Expected function to throw');
-          }
-          if (expectedError && typeof expectedError === 'string' && actualError.message !== expectedError) {
-            throw new Error(`Expected error "${expectedError}" but got "${actualError.message}"`);
-          }
-          if (expectedError && typeof expectedError === 'function' && !(actualError instanceof expectedError)) {
-            throw new Error(`Expected error to be instance of ${expectedError.name} but got ${actualError.constructor.name}`);
-          }
-        };
+        // Use webpack-bundled assert module from window.browseress
+        window.assert = window.browseress.assert;
         
         // Make process available globally like in Node.js
         if (!window.process && window.browseress?.process) {
