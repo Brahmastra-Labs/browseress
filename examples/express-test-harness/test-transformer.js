@@ -103,7 +103,16 @@ class TestTransformer {
       'node:crypto': 'window.browseress.crypto',
       'url': 'window.browseress.url',
       'node:url': 'window.browseress.url',
-      'parseurl': 'window.browseress.parseurl'
+      'parseurl': 'window.browseress.parseurl',
+      // Additional commonly needed polyfills
+      'node:fs': 'window.browseress.fs',
+      'node:path': 'window.browseress.path',
+      'node:buffer': '{ Buffer: window.Buffer }',
+      'buffer': '{ Buffer: window.Buffer }',
+      // Common Node.js modules that need browser alternatives
+      'node:async_hooks': '{ AsyncResource: class {} }', // Minimal stub for async hooks
+      'on-finished': 'window.onFinished || function() {}', // File download completion stub
+      'cookie-parser': 'window.cookieParser || function() { return function(req, res, next) { next(); }; }' // Cookie parser middleware stub
     };
 
     // Transform require statements
@@ -245,17 +254,9 @@ class TestTransformer {
       }
     );
 
-    // Transform assert(condition) to expect(condition).toBeTruthy()
-    transformed = transformed.replace(
-      /assert\s*\(\s*([^)]+)\)/g,
-      (match, condition) => {
-        // Skip if it's assert.something
-        if (match.includes('assert.')) return match;
-        modified = true;
-        modifications.push('Transformed assert() to expect');
-        return `expect(${condition.trim()}).toBeTruthy()`;
-      }
-    );
+    // Keep assert() as-is rather than transforming to expect
+    // The assert() calls should work with window.assert
+    // No transformation needed for simple assert() calls
 
     return { code: transformed, modified, modifications };
   }
@@ -277,6 +278,10 @@ class TestTransformer {
     expect, assert, request, express, app, transport,
     after: afterUtil, testUtils
   } = context;
+  
+  // Make expect and assert globally available in this execution context
+  window.expect = expect;
+  window.assert = assert;
   
   // Create a wrapper for the test
   const runTest = function() {

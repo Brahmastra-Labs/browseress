@@ -300,7 +300,25 @@
         // Run tests
         for (const test of this.tests) {
           try {
-            await test.fn();
+            // Check if test function expects a callback (done parameter)
+            if (test.fn.length > 0) {
+              // Test expects a done callback - use Promise wrapper
+              await new Promise((resolve, reject) => {
+                const done = (err) => {
+                  if (err) reject(err);
+                  else resolve();
+                };
+                
+                try {
+                  test.fn(done);
+                } catch (syncErr) {
+                  reject(syncErr);
+                }
+              });
+            } else {
+              // Test is synchronous or returns a promise
+              await test.fn();
+            }
             log(`  ✓ ${test.name}`, 'pass');
             passed++;
           } catch (err) {
@@ -434,14 +452,30 @@
         },
         
         expect(status, body, callback) {
-          if (typeof status === 'number' && typeof body === 'function') {
-            callback = body;
-            body = undefined;
+          // Handle different supertest API patterns:
+          // .expect(status, callback)
+          // .expect(body, callback) 
+          // .expect(status, body, callback)
+          
+          if (typeof status === 'number') {
+            // First param is status code
+            if (typeof body === 'function') {
+              // .expect(status, callback)
+              callback = body;
+              body = undefined;
+            }
+            this.expectedStatus = status;
+            this.expectedBody = body;
+          } else {
+            // First param is expected body (string/object)
+            if (typeof body === 'function') {
+              // .expect(body, callback)
+              callback = body;
+            }
+            this.expectedStatus = undefined; // Don't check status
+            this.expectedBody = status; // First param is actually the body
           }
           
-          // Store expectations
-          this.expectedStatus = status;
-          this.expectedBody = body;
           this.expectCallback = callback;
           
           // If callback is provided, execute the request immediately (like real supertest)
@@ -473,13 +507,21 @@
             
             // Create mock request object inheriting from IncomingMessage
             const mockReq = new http.IncomingMessage();
+            
+            // Ensure headers are properly formatted for Express
+            // Express expects headers in lowercase but should handle case-insensitive access
+            const normalizedHeaders = {};
+            Object.entries(this.headers).forEach(([key, value]) => {
+              normalizedHeaders[key.toLowerCase()] = value;
+            });
+            
             Object.assign(mockReq, {
               method: this.method,
               url: this.path,
               path: this.path,
               headers: {
                 'content-type': 'application/json',
-                ...this.headers
+                ...normalizedHeaders
               },
               body: this.body,
               // Don't set query - Express will compute it from the URL using its getter
@@ -537,30 +579,83 @@
             
             // Handle the request through the app
             console.log('[Request] Handling through app.handle...');
+            
+            // Add recursion detection
+            let handleCompleteCallCount = 0;
+            let appHandleCallCount = 0;
+            
             await new Promise((resolve, reject) => {
               const timeout = setTimeout(() => {
                 console.error('[Request] Timeout after 5 seconds');
                 console.error('[Request] mockRes.finished:', mockRes.finished);
                 console.error('[Request] mockRes.headersSent:', mockRes.headersSent);
+                console.error('[Request] handleCompleteCallCount:', handleCompleteCallCount);
+                console.error('[Request] appHandleCallCount:', appHandleCallCount);
                 reject(new Error('Request timeout'));
               }, 5000);
               
-              // Listen for finish event to know when response is complete
-              mockRes.once('finish', () => {
-                console.log('[Request] Response finished');
-                clearTimeout(timeout);
-                resolve();
-              });
+              // Listen for both finish and end events to know when response is complete
+              // Different events may be emitted depending on how the response ends
+              let resolved = false;
+              const handleComplete = (err) => {
+                handleCompleteCallCount++;
+                console.log(`[Request] handleComplete called (count: ${handleCompleteCallCount})`, err ? 'with error:' : 'successfully', err?.message || '');
+                
+                // Detect infinite recursion
+                if (handleCompleteCallCount > 10) {
+                  console.error('[Request] INFINITE RECURSION DETECTED in handleComplete!');
+                  console.error('[Request] Stack trace:', new Error().stack);
+                  reject(new Error('Infinite recursion in handleComplete'));
+                  return;
+                }
+                
+                if (!resolved) {
+                  console.log('[Request] Response completed', err ? 'with error:' : 'successfully', err?.message || '');
+                  resolved = true;
+                  clearTimeout(timeout);
+                  if (err) {
+                    reject(err);
+                  } else {
+                    resolve();
+                  }
+                }
+              };
+              
+              mockRes.once('finish', handleComplete);
+              mockRes.once('end', handleComplete);
               
               try {
                 console.log('[Request] Calling app.handle with mockReq:', mockReq.method, mockReq.path);
                 app.handle(mockReq, mockRes, (err) => {
-                  console.log('[Request] app.handle callback called, err:', err);
-                  if (err) {
-                    clearTimeout(timeout);
-                    reject(err);
+                  appHandleCallCount++;
+                  console.log(`[Request] app.handle callback called (count: ${appHandleCallCount}), err:`, err);
+                  
+                  // Detect infinite recursion in app.handle callback
+                  if (appHandleCallCount > 10) {
+                    console.error('[Request] INFINITE RECURSION DETECTED in app.handle callback!');
+                    console.error('[Request] Stack trace:', new Error().stack);
+                    reject(new Error('Infinite recursion in app.handle callback'));
+                    return;
                   }
-                  // Note: Don't resolve here, wait for 'finish' event
+                  
+                  if (err) {
+                    // Express error handler doesn't run in our test environment
+                    // Manually create the error response that Express would generate
+                    console.log('[Request] Express encountered error:', err.message);
+                    console.log('[Request] Simulating Express default error handler...');
+                    
+                    // Express default error handler sets 500 status and error message
+                    mockRes.statusCode = 500;
+                    mockRes.setHeader('Content-Type', 'text/html; charset=utf-8');
+                    
+                    // Create error response body (like Express does)
+                    const errorHtml = `<pre>${err.stack || err.message}</pre>`;
+                    mockRes.write(errorHtml);
+                    
+                    // Complete the response (this will trigger finish/end events)
+                    mockRes.end();
+                  }
+                  // Note: Don't resolve here for success case, wait for 'finish' event
                 });
               } catch (err) {
                 console.error('[Request] Error calling app.handle:', err);
@@ -584,26 +679,71 @@
               text: responseData
             };
             
-            // Check expectations
+            // Check expectations with debug logging
+            console.log('[Request] Checking expectations...');
+            console.log('[Request] expectedStatus:', this.expectedStatus, 'actualStatus:', res.status);
+            console.log('[Request] expectedBody:', typeof this.expectedBody, this.expectedBody);
+            console.log('[Request] actualBody:', typeof res.body, res.body);
+            console.log('[Request] callback:', typeof callback, callback?.name);
+            
             if (this.expectedStatus && res.status !== this.expectedStatus) {
               const err = new Error(`Expected status ${this.expectedStatus} but got ${res.status}`);
-              if (callback) callback(err);
-              else throw err;
+              console.log('[Request] Status expectation failed, calling callback with error');
+              if (callback) {
+                try {
+                  callback(err);
+                } catch (callbackError) {
+                  console.error('[Request] Callback threw error:', callbackError);
+                  throw callbackError;
+                }
+              } else {
+                throw err;
+              }
               return;
             }
             
             if (this.expectedBody !== undefined) {
               const actualBody = typeof res.body === 'string' ? res.body : JSON.stringify(res.body);
-              const expectedBody = typeof this.expectedBody === 'string' ? this.expectedBody : JSON.stringify(this.expectedBody);
-              if (actualBody !== expectedBody) {
-                const err = new Error(`Expected body ${expectedBody} but got ${actualBody}`);
-                if (callback) callback(err);
-                else throw err;
+              
+              let bodyMatches = false;
+              if (this.expectedBody instanceof RegExp) {
+                // Handle regex expectation
+                console.log('[Request] Body regex comparison - actual:', actualBody, 'expected:', this.expectedBody);
+                bodyMatches = this.expectedBody.test(actualBody);
+              } else {
+                // Handle string/object expectation
+                const expectedBody = typeof this.expectedBody === 'string' ? this.expectedBody : JSON.stringify(this.expectedBody);
+                console.log('[Request] Body comparison - actual:', actualBody, 'expected:', expectedBody);
+                bodyMatches = actualBody === expectedBody;
+              }
+              
+              if (!bodyMatches) {
+                const expectedStr = this.expectedBody instanceof RegExp ? this.expectedBody.toString() : this.expectedBody;
+                const err = new Error(`Expected body ${expectedStr} but got ${actualBody}`);
+                console.log('[Request] Body expectation failed, calling callback with error');
+                if (callback) {
+                  try {
+                    callback(err);
+                  } catch (callbackError) {
+                    console.error('[Request] Callback threw error:', callbackError);
+                    throw callbackError;
+                  }
+                } else {
+                  throw err;
+                }
                 return;
               }
             }
             
-            if (callback) callback(null, res);
+            console.log('[Request] All expectations passed, calling callback with success');
+            if (callback) {
+              try {
+                callback(null, res);
+              } catch (callbackError) {
+                console.error('[Request] Success callback threw error:', callbackError);
+                throw callbackError;
+              }
+            }
             return res;
           } catch (err) {
             if (callback) callback(err);
@@ -711,6 +851,16 @@
         // Make request function available globally for the test
         window.supertest = request;
         
+        // Make expect available globally for transformed tests (earlier)
+        window.expect = expect;
+        
+        // Create a simple assert function for compatibility
+        window.assert = function(condition, message) {
+          if (!condition) {
+            throw new Error(message || 'Assertion failed');
+          }
+        };
+        
         // Make process available globally like in Node.js
         if (!window.process && window.browseress?.process) {
           window.process = window.browseress.process;
@@ -723,6 +873,9 @@
           console.log('[Test] window.browseress?.process:', window.browseress?.process);
         }
         
+        
+        // Make expect available globally for transformed tests
+        window.expect = expect;
         
         // Create test context
         const testContext = {
